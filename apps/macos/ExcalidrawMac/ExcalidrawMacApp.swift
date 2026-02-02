@@ -17,11 +17,14 @@ struct ExcalidrawMacApp: App {
 struct ContentView: View {
     @StateObject private var documentManager: DocumentManager
     @StateObject private var viewModel: WebCanvasViewModel
+    @State private var didStartUp = false
 
     init() {
         let documentManager = DocumentManager()
+        let viewModel = WebCanvasViewModel(documentManager: documentManager)
+        viewModel.prewarm()
         _documentManager = StateObject(wrappedValue: documentManager)
-        _viewModel = StateObject(wrappedValue: WebCanvasViewModel(documentManager: documentManager))
+        _viewModel = StateObject(wrappedValue: viewModel)
     }
 
     var body: some View {
@@ -91,23 +94,39 @@ struct ContentView: View {
                 }
             }
         } detail: {
-            WebCanvasView(webView: viewModel.webView)
-                .background(Color(nsColor: .windowBackgroundColor))
-                .navigationTitle("Excalidraw")
-                .overlay(alignment: .bottomLeading) {
-                    Text(viewModel.statusText)
-                        .font(.caption)
-                        .padding(8)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-                        .padding()
+            ZStack {
+                WebCanvasView(webView: viewModel.webView)
+                    .background(Color(nsColor: .windowBackgroundColor))
+                if !viewModel.isWebViewReady {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("Loading canvas…")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(nsColor: .windowBackgroundColor))
                 }
+            }
+            .navigationTitle("Excalidraw")
+            .overlay(alignment: .bottomLeading) {
+                Text(viewModel.statusText)
+                    .font(.caption)
+                    .padding(8)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                    .padding()
+            }
         }
-        .onAppear {
+        .task {
+            guard !didStartUp else { return }
+            didStartUp = true
             viewModel.load()
             ensureActiveFolder()
         }
         .onChange(of: documentManager.sources) { _ in
             ensureActiveFolder()
+            documentManager.refreshIndexes()
         }
     }
 
@@ -150,10 +169,12 @@ struct ContentView: View {
 
 final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate, WKScriptMessageHandler {
     @Published var statusText: String = "Ready"
+    @Published var isWebViewReady = false
     let webView: WKWebView
 
     private let messageHandlerName = "bridge"
     private var didSendInitialScene = false
+    private var didStartLoading = false
     private let documentManager: DocumentManager
 
     init(documentManager: DocumentManager) {
@@ -167,7 +188,14 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
         webView.navigationDelegate = self
     }
 
+    func prewarm() {
+        load()
+    }
+
     func load() {
+        guard !didStartLoading else { return }
+        didStartLoading = true
+        isWebViewReady = false
         if let url = Bundle.main.url(forResource: "index", withExtension: "html") {
             webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
         } else if let devURL = URL(string: "http://localhost:5173") {
@@ -178,6 +206,7 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard !didSendInitialScene else { return }
         didSendInitialScene = true
+        isWebViewReady = true
         loadInitialScene()
     }
 
