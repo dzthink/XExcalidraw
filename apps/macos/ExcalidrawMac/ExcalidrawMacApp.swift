@@ -1,5 +1,7 @@
 import SwiftUI
+import AppKit
 import ExcalidrawShared
+import UniformTypeIdentifiers
 import WebKit
 
 @main
@@ -176,7 +178,86 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
         } else if type == "didChange" {
             statusText = "Unsaved changes"
         } else if type == "exportResult" {
-            statusText = "Export received"
+            handleExport(payload: payload)
+        }
+    }
+
+    private func handleExport(payload: [String: Any]) {
+        guard
+            let format = payload["format"] as? String,
+            let dataBase64 = payload["dataBase64"] as? String,
+            let exportData = Data(base64Encoded: dataBase64),
+            let exportType = exportType(for: format)
+        else {
+            statusText = "Export failed"
+            return
+        }
+
+        do {
+            let exportDirectory = try resolveExportDirectory()
+            let fileName = makeExportFileName(extension: exportType.preferredFilenameExtension ?? format)
+            let fileURL = exportDirectory.appendingPathComponent(fileName)
+            try exportData.write(to: fileURL, options: [.atomic])
+            statusText = "Exported \(fileName)"
+            presentSavePanel(data: exportData, suggestedName: fileName, contentType: exportType, initialDirectory: exportDirectory)
+        } catch {
+            statusText = "Export error: \(error.localizedDescription)"
+        }
+    }
+
+    private func resolveExportDirectory() throws -> URL {
+        guard let baseURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            throw DocumentManagerError.missingFolder
+        }
+        let exportURL = baseURL.appendingPathComponent("Exports", isDirectory: true)
+        try FileManager.default.createDirectory(at: exportURL, withIntermediateDirectories: true)
+        return exportURL
+    }
+
+    private func makeExportFileName(extension fileExtension: String) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let timestamp = formatter.string(from: Date())
+        let baseName = documentManager.currentEntry?
+            .fileURL
+            .deletingPathExtension()
+            .lastPathComponent ?? "Excalidraw"
+        return "\(baseName)-\(timestamp).\(fileExtension)"
+    }
+
+    private func exportType(for format: String) -> UTType? {
+        switch format.lowercased() {
+        case "png":
+            return .png
+        case "svg":
+            return .svg
+        case "json":
+            return .json
+        default:
+            return nil
+        }
+    }
+
+    private func presentSavePanel(
+        data: Data,
+        suggestedName: String,
+        contentType: UTType,
+        initialDirectory: URL
+    ) {
+        DispatchQueue.main.async {
+            let panel = NSSavePanel()
+            panel.allowedContentTypes = [contentType]
+            panel.nameFieldStringValue = suggestedName
+            panel.directoryURL = initialDirectory
+            panel.begin { [weak self] response in
+                guard response == .OK, let url = panel.url else { return }
+                do {
+                    try data.write(to: url, options: [.atomic])
+                    self?.statusText = "Saved \(url.lastPathComponent)"
+                } catch {
+                    self?.statusText = "Save error: \(error.localizedDescription)"
+                }
+            }
         }
     }
 
