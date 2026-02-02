@@ -1,3 +1,5 @@
+import type { AppState } from "@excalidraw/excalidraw/types";
+
 export type BridgeVersion = "1.0";
 
 export type BridgeEnvelope<TPayload> = {
@@ -12,9 +14,18 @@ export type LoadScenePayload = {
   readOnly: boolean;
 };
 
-export type SetAppStatePayload = {
-  theme: "light" | "dark";
-};
+export type AppStateUpdateKeys =
+  | "theme"
+  | "viewModeEnabled"
+  | "zenModeEnabled"
+  | "gridModeEnabled"
+  | "gridSize"
+  | "gridStep"
+  | "showWelcomeScreen";
+
+export type AppStateUpdate = Pick<AppState, AppStateUpdateKeys>;
+
+export type SetAppStatePayload = Partial<AppStateUpdate>;
 
 export type RequestExportPayload = {
   format: "png" | "svg" | "json";

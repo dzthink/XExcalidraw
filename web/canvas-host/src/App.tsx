@@ -11,9 +11,11 @@ import {
   sendToNative
 } from "./bridge";
 import type {
+  AppStateUpdate,
   LoadScenePayload,
   RequestExportPayload,
-  SaveScenePayload
+  SaveScenePayload,
+  SetAppStatePayload
 } from "./types";
 import "./styles.css";
 
@@ -24,6 +26,40 @@ type LoadState = {
 };
 
 const SAVE_DEBOUNCE_MS = 3000;
+
+const getAppStateUpdate = (
+  payload: SetAppStatePayload
+): AppStateUpdate | null => {
+  const nextAppState: Partial<AppStateUpdate> = {};
+
+  if (payload.theme !== undefined) {
+    nextAppState.theme = payload.theme;
+  }
+  if (payload.viewModeEnabled !== undefined) {
+    nextAppState.viewModeEnabled = payload.viewModeEnabled;
+  }
+  if (payload.zenModeEnabled !== undefined) {
+    nextAppState.zenModeEnabled = payload.zenModeEnabled;
+  }
+  if (payload.gridModeEnabled !== undefined) {
+    nextAppState.gridModeEnabled = payload.gridModeEnabled;
+  }
+  if (payload.gridSize !== undefined) {
+    nextAppState.gridSize = payload.gridSize;
+  }
+  if (payload.gridStep !== undefined) {
+    nextAppState.gridStep = payload.gridStep;
+  }
+  if (payload.showWelcomeScreen !== undefined) {
+    nextAppState.showWelcomeScreen = payload.showWelcomeScreen;
+  }
+
+  if (Object.keys(nextAppState).length === 0) {
+    return null;
+  }
+
+  return nextAppState as AppStateUpdate;
+};
 
 export default function App() {
   const excalidrawApi = useRef<ExcalidrawImperativeAPI | null>(null);
@@ -66,6 +102,18 @@ export default function App() {
           sceneJson: payload.sceneJson,
           readOnly: payload.readOnly
         });
+      }
+      if (message.type === "setAppState") {
+        const api = excalidrawApi.current;
+        if (!api) {
+          return;
+        }
+        const payload = message.payload as SetAppStatePayload;
+        const appStateUpdate = getAppStateUpdate(payload);
+        if (!appStateUpdate) {
+          return;
+        }
+        api.updateScene({ appState: appStateUpdate });
       }
       if (message.type === "requestExport") {
         const api = excalidrawApi.current;
