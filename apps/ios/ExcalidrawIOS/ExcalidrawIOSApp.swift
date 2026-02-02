@@ -28,34 +28,36 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            List {
+            List(selection: $documentManager.activeFolderId) {
                 Section("Folders") {
                     ForEach(documentManager.sources) { source in
                         Text(source.displayName)
+                            .tag(source.id)
                     }
                     .onDelete(perform: deleteSources)
                 }
                 Section {
-                    let sortedEntries = documentManager.indexedEntries.sorted {
-                        let lhsDate = $0.lastOpenedAt ?? $0.modifiedAt
-                        let rhsDate = $1.lastOpenedAt ?? $1.modifiedAt
-                        return lhsDate > rhsDate
-                    }
-                    ForEach(sortedEntries) { entry in
-                        Button {
-                            viewModel.open(entry: entry)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(entry.fileName)
-                                    .font(.headline)
-                                if let lastOpenedAt = entry.lastOpenedAt {
-                                    Text("Last opened \(lastOpenedAt.formatted(date: .abbreviated, time: .shortened))")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                } else {
-                                    Text("Never opened")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                    if filteredEntries.isEmpty {
+                        Text(documentManager.activeFolderId == nil ? "Select a folder" : "No documents")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(filteredEntries) { entry in
+                            Button {
+                                viewModel.open(entry: entry)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(entry.fileName)
+                                        .font(.headline)
+                                    if let lastOpenedAt = entry.lastOpenedAt {
+                                        Text("Last opened \(lastOpenedAt.formatted(date: .abbreviated, time: .shortened))")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    } else {
+                                        Text("Never opened")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
                             }
                         }
@@ -120,14 +122,42 @@ struct ContentView: View {
             guard !didStartUp else { return }
             didStartUp = true
             viewModel.load()
+            ensureActiveFolder()
+        }
+        .onChange(of: documentManager.sources) { _ in
+            ensureActiveFolder()
             documentManager.refreshIndexes()
         }
     }
 
     private func deleteSources(at offsets: IndexSet) {
+        let removedIds = offsets.map { documentManager.sources[$0].id }
         for index in offsets {
             let source = documentManager.sources[index]
             documentManager.removeFolder(id: source.id)
+        }
+        if let activeId = documentManager.activeFolderId, removedIds.contains(activeId) {
+            documentManager.activeFolderId = documentManager.sources.first(where: { !removedIds.contains($0.id) })?.id
+        }
+    }
+
+    private func ensureActiveFolder() {
+        guard let activeFolderId = documentManager.activeFolderId else {
+            documentManager.activeFolderId = documentManager.sources.first?.id
+            return
+        }
+        if !documentManager.sources.contains(where: { $0.id == activeFolderId }) {
+            documentManager.activeFolderId = documentManager.sources.first?.id
+        }
+    }
+
+    private var filteredEntries: [ExcalidrawFileEntry] {
+        guard let activeFolderId = documentManager.activeFolderId else { return [] }
+        let entries = documentManager.indexedEntries.filter { $0.folderId == activeFolderId }
+        return entries.sorted {
+            let lhsDate = $0.lastOpenedAt ?? $0.modifiedAt
+            let rhsDate = $1.lastOpenedAt ?? $1.modifiedAt
+            return lhsDate > rhsDate
         }
     }
 }
