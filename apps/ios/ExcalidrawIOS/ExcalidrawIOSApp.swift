@@ -1,5 +1,6 @@
 import SwiftUI
 import ExcalidrawShared
+import UIKit
 import WebKit
 
 @main
@@ -168,7 +169,76 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
         } else if type == "didChange" {
             statusText = "Unsaved changes"
         } else if type == "exportResult" {
-            statusText = "Export received"
+            handleExport(payload: payload)
+        }
+    }
+
+    private func handleExport(payload: [String: Any]) {
+        guard
+            let format = payload["format"] as? String,
+            let dataBase64 = payload["dataBase64"] as? String,
+            let exportData = Data(base64Encoded: dataBase64),
+            let fileExtension = fileExtension(for: format)
+        else {
+            statusText = "Export failed"
+            return
+        }
+
+        do {
+            let exportDirectory = try resolveExportDirectory()
+            let fileName = makeExportFileName(extension: fileExtension)
+            let fileURL = exportDirectory.appendingPathComponent(fileName)
+            try exportData.write(to: fileURL, options: [.atomic])
+            statusText = "Exported \(fileName)"
+            presentShareSheet(for: fileURL)
+        } catch {
+            statusText = "Export error: \(error.localizedDescription)"
+        }
+    }
+
+    private func resolveExportDirectory() throws -> URL {
+        guard let baseURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            throw DocumentManagerError.missingFolder
+        }
+        let exportURL = baseURL.appendingPathComponent("Exports", isDirectory: true)
+        try FileManager.default.createDirectory(at: exportURL, withIntermediateDirectories: true)
+        return exportURL
+    }
+
+    private func makeExportFileName(extension fileExtension: String) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let timestamp = formatter.string(from: Date())
+        let baseName = documentManager.currentEntry?
+            .fileURL
+            .deletingPathExtension()
+            .lastPathComponent ?? "Excalidraw"
+        return "\(baseName)-\(timestamp).\(fileExtension)"
+    }
+
+    private func fileExtension(for format: String) -> String? {
+        switch format.lowercased() {
+        case "png":
+            return "png"
+        case "svg":
+            return "svg"
+        case "json":
+            return "json"
+        default:
+            return nil
+        }
+    }
+
+    private func presentShareSheet(for fileURL: URL) {
+        DispatchQueue.main.async {
+            guard
+                let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                let rootViewController = windowScene.windows.first(where: { $0.isKeyWindow })?.rootViewController
+            else {
+                return
+            }
+            let activityController = UIActivityViewController(activityItems: [fileURL], applicationActivities: nil)
+            rootViewController.present(activityController, animated: true)
         }
     }
 
