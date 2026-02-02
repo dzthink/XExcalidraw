@@ -1,4 +1,5 @@
 import Combine
+import Compression
 import Foundation
 
 public struct DocumentScene {
@@ -75,6 +76,34 @@ public final class DocumentManager: ObservableObject {
         currentEntry = updatedEntry
         activeFolderId = updatedEntry.folderId
         return DocumentScene(docId: updatedEntry.fileURL.path, sceneJson: jsonObject, readOnly: false)
+    }
+
+    public func importScene(
+        from fileURL: URL,
+        completion: @escaping (Result<ExcalidrawFileEntry, Error>) -> Void
+    ) {
+        saveQueue.async { [weak self] in
+            guard let self else { return }
+            do {
+                let sceneJson = try self.loadImportScene(from: fileURL)
+                let targetName = self.makeImportDocumentName(from: fileURL)
+                let targetURL = try self.resolveSaveURL(docId: targetName)
+                let jsonData = try JSONSerialization.data(withJSONObject: sceneJson, options: [.prettyPrinted])
+                try jsonData.write(to: targetURL, options: [.atomic])
+                DispatchQueue.main.async {
+                    let entry = self.updateIndexAfterSave(fileURL: targetURL)
+                    if let entry {
+                        completion(.success(entry))
+                    } else {
+                        completion(.failure(DocumentManagerError.unindexedFile))
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+            }
+        }
     }
 
     public func mostRecentEntry() -> ExcalidrawFileEntry? {
@@ -170,11 +199,218 @@ public final class DocumentManager: ObservableObject {
         }
         return nil
     }
+
+    private func loadImportScene(from fileURL: URL) throws -> Any {
+        let fileName = fileURL.lastPathComponent.lowercased()
+        let fileExtension = fileURL.pathExtension.lowercased()
+        let data = try Data(contentsOf: fileURL)
+        if fileExtension == "excalidraw" {
+            return try JSONSerialization.jsonObject(with: data)
+        }
+        if fileName.hasSuffix(".excalidraw.json") {
+            return try JSONSerialization.jsonObject(with: data)
+        }
+        if fileName.hasSuffix(".excalidraw.svg") {
+            return try parseSvgScene(from: data)
+        }
+        if fileName.hasSuffix(".excalidraw.png") {
+            return try parsePngScene(from: data)
+        }
+        throw DocumentManagerError.unsupportedImportType
+    }
+
+    private func makeImportDocumentName(from fileURL: URL) -> String {
+        var normalizedURL = fileURL
+        normalizedURL.deletePathExtension()
+        if normalizedURL.pathExtension.lowercased() == "excalidraw" {
+            normalizedURL.deletePathExtension()
+        }
+        let baseName = normalizedURL.lastPathComponent
+        return baseName.isEmpty ? UUID().uuidString : baseName
+    }
+
+    private func parseSvgScene(from data: Data) throws -> Any {
+        guard let svgString = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
+            throw DocumentManagerError.invalidImportData
+        }
+        let payloadText = try extractSvgPayload(from: svgString)
+        let sceneJson = try decodeEmbeddedScene(from: payloadText)
+        guard let sceneData = sceneJson.data(using: .utf8) else {
+            throw DocumentManagerError.invalidImportData
+        }
+        return try JSONSerialization.jsonObject(with: sceneData)
+    }
+
+    private func parsePngScene(from data: Data) throws -> Any {
+        guard let payloadText = try extractPngPayload(from: data) else {
+            throw DocumentManagerError.missingEmbeddedScene
+        }
+        let sceneJson = try decodeEmbeddedScene(from: payloadText)
+        guard let sceneData = sceneJson.data(using: .utf8) else {
+            throw DocumentManagerError.invalidImportData
+        }
+        return try JSONSerialization.jsonObject(with: sceneData)
+    }
+
+    private func extractSvgPayload(from svg: String) throws -> String {
+        let payloadType = "payload-type:application/vnd.excalidraw+json"
+        guard svg.contains(payloadType) else {
+            throw DocumentManagerError.missingEmbeddedScene
+        }
+        let payloadPattern = "<!--\\s*payload-start\\s*-->\\s*(.+?)\\s*<!--\\s*payload-end\\s*-->"
+        let payloadRegex = try NSRegularExpression(pattern: payloadPattern, options: [.dotMatchesLineSeparators])
+        let payloadRange = NSRange(svg.startIndex..., in: svg)
+        guard
+            let payloadMatch = payloadRegex.firstMatch(in: svg, options: [], range: payloadRange),
+            payloadMatch.numberOfRanges > 1,
+            let payloadCapture = Range(payloadMatch.range(at: 1), in: svg)
+        else {
+            throw DocumentManagerError.invalidImportData
+        }
+        let versionPattern = "<!--\\s*payload-version:(\\d+)\\s*-->"
+        let versionRegex = try NSRegularExpression(pattern: versionPattern, options: [])
+        let versionMatch = versionRegex.firstMatch(in: svg, options: [], range: payloadRange)
+        var payloadVersion = "1"
+        if let versionMatch, versionMatch.numberOfRanges > 1, let versionRange = Range(versionMatch.range(at: 1), in: svg) {
+            payloadVersion = String(svg[versionRange])
+        }
+        let isByteString = payloadVersion != "1"
+        let base64Payload = String(svg[payloadCapture]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let payloadData = Data(base64Encoded: base64Payload) else {
+            throw DocumentManagerError.invalidImportData
+        }
+        if isByteString {
+            guard let byteString = payloadData.withUnsafeBytes({ buffer in
+                String(bytes: buffer.bindMemory(to: UInt8.self), encoding: .isoLatin1)
+            }) else {
+                throw DocumentManagerError.invalidImportData
+            }
+            return byteString
+        }
+        guard let utf8String = String(data: payloadData, encoding: .utf8) else {
+            throw DocumentManagerError.invalidImportData
+        }
+        return utf8String
+    }
+
+    private func extractPngPayload(from data: Data) throws -> String? {
+        let signature: [UInt8] = [137, 80, 78, 71, 13, 10, 26, 10]
+        guard data.count > signature.count else {
+            throw DocumentManagerError.invalidImportData
+        }
+        if Array(data.prefix(signature.count)) != signature {
+            throw DocumentManagerError.invalidImportData
+        }
+        var index = signature.count
+        while index + 8 <= data.count {
+            let lengthData = data[index..<(index + 4)]
+            let length = lengthData.reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
+            let typeStart = index + 4
+            let typeEnd = typeStart + 4
+            guard typeEnd <= data.count else {
+                break
+            }
+            let typeData = data[typeStart..<typeEnd]
+            let typeString = String(bytes: typeData, encoding: .ascii) ?? ""
+            let dataStart = typeEnd
+            let dataEnd = dataStart + Int(length)
+            guard dataEnd <= data.count else {
+                break
+            }
+            if typeString == "tEXt" {
+                let chunkData = data[dataStart..<dataEnd]
+                if let nullIndex = chunkData.firstIndex(of: 0) {
+                    let keywordData = chunkData[..<nullIndex]
+                    let textData = chunkData[chunkData.index(after: nullIndex)...]
+                    let keyword = String(data: keywordData, encoding: .isoLatin1) ?? ""
+                    let text = String(data: textData, encoding: .isoLatin1) ?? ""
+                    if keyword == "application/vnd.excalidraw+json" {
+                        return text
+                    }
+                }
+            }
+            index = dataEnd + 4
+        }
+        return nil
+    }
+
+    private func decodeEmbeddedScene(from payload: String) throws -> String {
+        guard let payloadData = payload.data(using: .isoLatin1) else {
+            throw DocumentManagerError.invalidImportData
+        }
+        let jsonObject = try JSONSerialization.jsonObject(with: payloadData)
+        guard let dictionary = jsonObject as? [String: Any] else {
+            throw DocumentManagerError.invalidImportData
+        }
+        if let type = dictionary["type"] as? String, type == "excalidraw" {
+            return payload
+        }
+        guard let encodedString = dictionary["encoded"] as? String else {
+            throw DocumentManagerError.invalidImportData
+        }
+        let encoding = dictionary["encoding"] as? String ?? "bstring"
+        guard encoding == "bstring" else {
+            throw DocumentManagerError.invalidImportData
+        }
+        let compressed = dictionary["compressed"] as? Bool ?? false
+        let encodedBytes = encodedString.unicodeScalars.map { UInt8($0.value) }
+        let encodedData = Data(encodedBytes)
+        let decodedData: Data
+        if compressed {
+            decodedData = try inflateZlib(encodedData)
+        } else {
+            decodedData = encodedData
+        }
+        guard let decodedString = String(data: decodedData, encoding: .utf8) else {
+            throw DocumentManagerError.invalidImportData
+        }
+        return decodedString
+    }
+
+    private func inflateZlib(_ data: Data) throws -> Data {
+        return try data.withUnsafeBytes { (sourceBuffer: UnsafeRawBufferPointer) -> Data in
+            guard let sourcePointer = sourceBuffer.bindMemory(to: UInt8.self).baseAddress else {
+                throw DocumentManagerError.invalidImportData
+            }
+            let bufferSize = 64 * 1024
+            var stream = compression_stream()
+            var status = compression_stream_init(&stream, COMPRESSION_STREAM_DECODE, COMPRESSION_ZLIB)
+            guard status != COMPRESSION_STATUS_ERROR else {
+                throw DocumentManagerError.invalidImportData
+            }
+            defer {
+                compression_stream_destroy(&stream)
+            }
+            var output = Data()
+            stream.src_ptr = sourcePointer
+            stream.src_size = sourceBuffer.count
+            let outputBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+            defer {
+                outputBuffer.deallocate()
+            }
+            repeat {
+                stream.dst_ptr = outputBuffer
+                stream.dst_size = bufferSize
+                status = compression_stream_process(&stream, 0)
+                let produced = bufferSize - stream.dst_size
+                if produced > 0 {
+                    output.append(outputBuffer, count: produced)
+                }
+            } while status == COMPRESSION_STATUS_OK
+            if status != COMPRESSION_STATUS_END {
+                throw DocumentManagerError.invalidImportData
+            }
+            return output
+        }
+    }
 }
 
 public enum DocumentManagerError: LocalizedError {
     case missingFolder
     case unindexedFile
+    case unsupportedImportType
+    case missingEmbeddedScene
+    case invalidImportData
 
     public var errorDescription: String? {
         switch self {
@@ -182,6 +418,12 @@ public enum DocumentManagerError: LocalizedError {
             return "No folder selected for saving documents."
         case .unindexedFile:
             return "Unable to update index for saved document."
+        case .unsupportedImportType:
+            return "Unsupported file type for import."
+        case .missingEmbeddedScene:
+            return "No embedded scene data found in the file."
+        case .invalidImportData:
+            return "Unable to decode the imported scene."
         }
     }
 }
