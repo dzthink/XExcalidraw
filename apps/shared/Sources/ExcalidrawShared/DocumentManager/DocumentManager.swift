@@ -144,7 +144,7 @@ public final class DocumentManager: ObservableObject {
     }
 
     private func updateIndexAfterSave(fileURL: URL) -> ExcalidrawFileEntry? {
-        if let updated = store.updateEntryMetadata(for: fileURL) {
+        if let updated = store.updateEntryAfterSave(for: fileURL) {
             currentEntry = updated
             return updated
         }
