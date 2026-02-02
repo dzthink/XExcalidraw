@@ -17,6 +17,8 @@ struct ContentView: View {
     @StateObject private var viewModel: WebCanvasViewModel
     @State private var isShowingPicker = false
     @State private var didStartUp = false
+    @State private var isShowingDraftAlert = false
+    @State private var pendingDraft: DocumentDraft?
 
     init() {
         let documentManager = DocumentManager()
@@ -111,11 +113,19 @@ struct ContentView: View {
             }
             .navigationTitle("Excalidraw")
             .overlay(alignment: .bottomLeading) {
-                Text(viewModel.statusText)
-                    .font(.caption)
-                    .padding(8)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-                    .padding()
+                VStack(alignment: .leading, spacing: 6) {
+                    if viewModel.hasUnsavedChanges {
+                        Label("未保存更改", systemImage: "exclamationmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                    Text(viewModel.statusText)
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                }
+                .padding(8)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                .padding()
             }
         }
         .task {
@@ -127,6 +137,31 @@ struct ContentView: View {
         .onChange(of: documentManager.sources) { _ in
             ensureActiveFolder()
             documentManager.refreshIndexes()
+        }
+        .onChange(of: documentManager.pendingDraft) { draft in
+            guard let draft else { return }
+            if pendingDraft == nil {
+                pendingDraft = draft
+                isShowingDraftAlert = true
+            }
+        }
+        .alert("检测到未保存的内容", isPresented: $isShowingDraftAlert) {
+            Button("恢复") {
+                if let draft = documentManager.consumePendingDraft() {
+                    viewModel.restoreDraft(draft)
+                }
+                pendingDraft = nil
+            }
+            Button("放弃", role: .destructive) {
+                documentManager.discardPendingDraft()
+                pendingDraft = nil
+            }
+        } message: {
+            if let draft = pendingDraft {
+                Text("是否恢复 \(draft.savedAt.formatted(date: .abbreviated, time: .shortened)) 的临时保存？")
+            } else {
+                Text("是否恢复临时保存的画布？")
+            }
         }
     }
 
@@ -165,6 +200,7 @@ struct ContentView: View {
 final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate, WKScriptMessageHandler {
     @Published var statusText: String = "Ready"
     @Published var isWebViewReady = false
+    @Published var hasUnsavedChanges = false
     let webView: WKWebView
 
     private let messageHandlerName = "bridge"
@@ -228,7 +264,9 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
         if type == "saveScene" {
             handleSave(payload: payload)
         } else if type == "didChange" {
-            statusText = "Unsaved changes"
+            let dirty = payload["dirty"] as? Bool ?? true
+            hasUnsavedChanges = dirty
+            statusText = dirty ? "Unsaved changes" : "All changes saved"
         } else if type == "exportResult" {
             handleExport(payload: payload)
         } else if type == "requestAI" {
@@ -339,6 +377,7 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
             switch result {
             case .success(let entry):
                 self?.statusText = "Saved \(entry.fileName)"
+                self?.hasUnsavedChanges = false
             case .failure(let error):
                 self?.statusText = "Save error: \(error.localizedDescription)"
             }
@@ -354,6 +393,7 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
                 "readOnly": scene.readOnly
             ])
             statusText = "Loaded \(entry.fileName)"
+            hasUnsavedChanges = false
         } catch {
             statusText = "Load error: \(error.localizedDescription)"
         }
@@ -372,6 +412,17 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
         ]
         send(type: "loadScene", payload: payload)
         statusText = "Loaded new scene"
+        hasUnsavedChanges = false
+    }
+
+    func restoreDraft(_ draft: DocumentDraft) {
+        send(type: "loadScene", payload: [
+            "docId": draft.docId,
+            "sceneJson": draft.sceneJson,
+            "readOnly": false
+        ])
+        statusText = "Restored draft"
+        hasUnsavedChanges = true
     }
 
     private func send(type: String, payload: [String: Any]) {
