@@ -7,13 +7,27 @@ struct FolderSourcesView: View {
 
     var body: some View {
         List(selection: .constant(Set<UUID>())) {
-            ForEach(store.sources) { source in
-                Text(source.displayName)
-                    .contextMenu {
-                        Button("Remove") {
-                            store.removeFolder(id: source.id)
+            Section("Folders") {
+                ForEach(store.sources) { source in
+                    Text(source.displayName)
+                        .contextMenu {
+                            Button("Remove") {
+                                store.removeFolder(id: source.id)
+                            }
                         }
+                }
+            }
+            Section("Indexed Files") {
+                let folderLookup = Dictionary(uniqueKeysWithValues: store.sources.map { ($0.id, $0.displayName) })
+                ForEach(store.indexedEntries.sorted(by: { $0.modifiedAt > $1.modifiedAt })) { entry in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(entry.fileName)
+                            .font(.headline)
+                        Text(folderLookup[entry.folderId, default: "Unknown Folder"])
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
+                }
             }
         }
         .listStyle(.sidebar)

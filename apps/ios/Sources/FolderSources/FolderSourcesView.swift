@@ -9,10 +9,24 @@ struct FolderSourcesView: View {
     var body: some View {
         NavigationView {
             List {
-                ForEach(store.sources) { source in
-                    Text(source.displayName)
+                Section("Folders") {
+                    ForEach(store.sources) { source in
+                        Text(source.displayName)
+                    }
+                    .onDelete(perform: deleteSources)
                 }
-                .onDelete(perform: deleteSources)
+                Section("Indexed Files") {
+                    let folderLookup = Dictionary(uniqueKeysWithValues: store.sources.map { ($0.id, $0.displayName) })
+                    ForEach(store.indexedEntries.sorted(by: { $0.modifiedAt > $1.modifiedAt })) { entry in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(entry.fileName)
+                                .font(.headline)
+                            Text(folderLookup[entry.folderId, default: "Unknown Folder"])
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
             }
             .navigationTitle("Folder Sources")
             .toolbar {
@@ -23,7 +37,18 @@ struct FolderSourcesView: View {
                         Image(systemName: "plus")
                     }
                 }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        // TODO: Consider NSFileCoordinator on iOS for automatic file updates.
+                        store.refreshAllIndexes()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }
             }
+        }
+        .refreshable {
+            store.refreshAllIndexes()
         }
         .sheet(isPresented: $isShowingPicker) {
             FolderSourcePicker(store: store)
