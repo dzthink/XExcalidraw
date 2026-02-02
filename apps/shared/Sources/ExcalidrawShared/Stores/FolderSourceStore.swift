@@ -76,6 +76,7 @@ public final class FolderSourceStore: ObservableObject {
 
     public func refreshAllIndexes() {
         let sourcesSnapshot = sources
+        let existingEntries = indexedEntries
         indexingQueue.async { [weak self] in
             guard let self else { return }
             var aggregated: [ExcalidrawFileEntry] = []
@@ -86,7 +87,7 @@ public final class FolderSourceStore: ObservableObject {
                 }
             }
             DispatchQueue.main.async {
-                self.indexedEntries = aggregated
+                self.indexedEntries = self.mergeEntries(aggregated, existingEntries: existingEntries)
                 self.persistIndexEntries()
             }
         }
@@ -179,8 +180,10 @@ public final class FolderSourceStore: ObservableObject {
     }
 
     private func updateIndexEntries(folderId: UUID, entries: [ExcalidrawFileEntry]) {
+        let existingEntries = indexedEntries.filter { $0.folderId == folderId }
+        let merged = mergeEntries(entries, existingEntries: existingEntries)
         indexedEntries.removeAll { $0.folderId == folderId }
-        indexedEntries.append(contentsOf: entries)
+        indexedEntries.append(contentsOf: merged)
         persistIndexEntries()
     }
 
@@ -234,6 +237,122 @@ public final class FolderSourceStore: ObservableObject {
             fileSize: fileSize
         )
         results.append(entry)
+    }
+
+    private func mergeEntries(
+        _ newEntries: [ExcalidrawFileEntry],
+        existingEntries: [ExcalidrawFileEntry]
+    ) -> [ExcalidrawFileEntry] {
+        let existingLookup = Dictionary(uniqueKeysWithValues: existingEntries.map { ($0.fileURL, $0) })
+        return newEntries.map { entry in
+            guard let existing = existingLookup[entry.fileURL] else { return entry }
+            return ExcalidrawFileEntry(
+                id: existing.id,
+                folderId: entry.folderId,
+                relativePath: entry.relativePath,
+                fileName: entry.fileName,
+                fileURL: entry.fileURL,
+                modifiedAt: entry.modifiedAt,
+                fileSize: entry.fileSize,
+                lastOpenedAt: existing.lastOpenedAt,
+                thumbnailPath: existing.thumbnailPath
+            )
+        }
+    }
+
+    @discardableResult
+    public func updateLastOpenedAt(for fileURL: URL, date: Date = Date()) -> ExcalidrawFileEntry? {
+        guard let index = indexedEntries.firstIndex(where: { $0.fileURL == fileURL }) else {
+            return nil
+        }
+        let existing = indexedEntries[index]
+        let updated = ExcalidrawFileEntry(
+            id: existing.id,
+            folderId: existing.folderId,
+            relativePath: existing.relativePath,
+            fileName: existing.fileName,
+            fileURL: existing.fileURL,
+            modifiedAt: existing.modifiedAt,
+            fileSize: existing.fileSize,
+            lastOpenedAt: date,
+            thumbnailPath: existing.thumbnailPath
+        )
+        indexedEntries[index] = updated
+        persistIndexEntries()
+        return updated
+    }
+
+    @discardableResult
+    public func updateEntryMetadata(for fileURL: URL) -> ExcalidrawFileEntry? {
+        guard let index = indexedEntries.firstIndex(where: { $0.fileURL == fileURL }) else {
+            return nil
+        }
+        let existing = indexedEntries[index]
+        let resourceValues = try? fileURL.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+        let modifiedAt = resourceValues?.contentModificationDate ?? existing.modifiedAt
+        let fileSize = Int64(resourceValues?.fileSize ?? Int(existing.fileSize))
+        let updated = ExcalidrawFileEntry(
+            id: existing.id,
+            folderId: existing.folderId,
+            relativePath: existing.relativePath,
+            fileName: existing.fileName,
+            fileURL: existing.fileURL,
+            modifiedAt: modifiedAt,
+            fileSize: fileSize,
+            lastOpenedAt: existing.lastOpenedAt,
+            thumbnailPath: existing.thumbnailPath
+        )
+        indexedEntries[index] = updated
+        persistIndexEntries()
+        return updated
+    }
+
+    @discardableResult
+    public func upsertEntry(
+        for fileURL: URL,
+        folderId: UUID,
+        rootURL: URL,
+        lastOpenedAt: Date? = nil
+    ) -> ExcalidrawFileEntry? {
+        guard fileURL.pathExtension.lowercased() == "excalidraw" else { return nil }
+        let resourceValues = try? fileURL.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey])
+        guard resourceValues?.isRegularFile ?? true else { return nil }
+        let modifiedAt = resourceValues?.contentModificationDate ?? Date()
+        let fileSize = Int64(resourceValues?.fileSize ?? 0)
+        let relativePath = fileURL.path.replacingOccurrences(
+            of: rootURL.path.appending("/"),
+            with: ""
+        )
+        let fileName = fileURL.lastPathComponent
+        if let index = indexedEntries.firstIndex(where: { $0.fileURL == fileURL }) {
+            let existing = indexedEntries[index]
+            let updated = ExcalidrawFileEntry(
+                id: existing.id,
+                folderId: folderId,
+                relativePath: relativePath,
+                fileName: fileName,
+                fileURL: fileURL,
+                modifiedAt: modifiedAt,
+                fileSize: fileSize,
+                lastOpenedAt: lastOpenedAt ?? existing.lastOpenedAt,
+                thumbnailPath: existing.thumbnailPath
+            )
+            indexedEntries[index] = updated
+            persistIndexEntries()
+            return updated
+        }
+        let entry = ExcalidrawFileEntry(
+            folderId: folderId,
+            relativePath: relativePath,
+            fileName: fileName,
+            fileURL: fileURL,
+            modifiedAt: modifiedAt,
+            fileSize: fileSize,
+            lastOpenedAt: lastOpenedAt
+        )
+        indexedEntries.append(entry)
+        persistIndexEntries()
+        return entry
     }
 
 #if os(macOS)
