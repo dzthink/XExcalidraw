@@ -13,10 +13,80 @@ struct ExcalidrawMacApp: App {
 }
 
 struct ContentView: View {
-    @StateObject private var viewModel = WebCanvasViewModel()
+    @StateObject private var documentManager: DocumentManager
+    @StateObject private var viewModel: WebCanvasViewModel
+
+    init() {
+        let documentManager = DocumentManager()
+        _documentManager = StateObject(wrappedValue: documentManager)
+        _viewModel = StateObject(wrappedValue: WebCanvasViewModel(documentManager: documentManager))
+    }
 
     var body: some View {
-        NavigationView {
+        NavigationSplitView {
+            List {
+                Section("Folders") {
+                    ForEach(documentManager.sources) { source in
+                        Text(source.displayName)
+                            .contextMenu {
+                                Button("Remove") {
+                                    documentManager.removeFolder(id: source.id)
+                                }
+                            }
+                    }
+                }
+                Section {
+                    let sortedEntries = documentManager.indexedEntries.sorted {
+                        let lhsDate = $0.lastOpenedAt ?? $0.modifiedAt
+                        let rhsDate = $1.lastOpenedAt ?? $1.modifiedAt
+                        return lhsDate > rhsDate
+                    }
+                    ForEach(sortedEntries) { entry in
+                        Button {
+                            viewModel.open(entry: entry)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(entry.fileName)
+                                    .font(.headline)
+                                if let lastOpenedAt = entry.lastOpenedAt {
+                                    Text("Last opened \(lastOpenedAt.formatted(date: .abbreviated, time: .shortened))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Text("Never opened")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Documents")
+                } footer: {
+                    Text("Index: \(documentManager.indexStatus.description)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .listStyle(.sidebar)
+            .navigationTitle("Documents")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        openFolderPicker()
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        documentManager.refreshIndexes()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }
+            }
+        } detail: {
             WebCanvasView(webView: viewModel.webView)
                 .background(Color(nsColor: .windowBackgroundColor))
                 .navigationTitle("Excalidraw")
@@ -32,6 +102,22 @@ struct ContentView: View {
             viewModel.load()
         }
     }
+
+    private func openFolderPicker() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = false
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                try documentManager.addFolder(url: url)
+            } catch {
+                // Handle errors in the caller if needed.
+            }
+        }
+    }
 }
 
 final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate, WKScriptMessageHandler {
@@ -40,8 +126,10 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
 
     private let messageHandlerName = "bridge"
     private var didSendInitialScene = false
+    private let documentManager: DocumentManager
 
-    override init() {
+    init(documentManager: DocumentManager) {
+        self.documentManager = documentManager
         let contentController = WKUserContentController()
         let config = WKWebViewConfiguration()
         config.userContentController = contentController
@@ -62,7 +150,7 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard !didSendInitialScene else { return }
         didSendInitialScene = true
-        sendLoadScene()
+        loadInitialScene()
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -101,26 +189,35 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
             return
         }
 
-        let fileURL = storageDirectory().appendingPathComponent("\(docId).excalidraw")
+        documentManager.saveScene(docId: docId, sceneJson: sceneJson) { [weak self] result in
+            switch result {
+            case .success(let entry):
+                self?.statusText = "Saved \(entry.fileName)"
+            case .failure(let error):
+                self?.statusText = "Save error: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func open(entry: ExcalidrawFileEntry) {
         do {
-            let jsonData = try JSONSerialization.data(withJSONObject: sceneJson, options: [.prettyPrinted])
-            try jsonData.write(to: fileURL, options: [.atomic])
-            statusText = "Saved \(fileURL.lastPathComponent)"
+            let scene = try documentManager.open(entry: entry)
+            send(type: "loadScene", payload: [
+                "docId": scene.docId,
+                "sceneJson": scene.sceneJson,
+                "readOnly": scene.readOnly
+            ])
+            statusText = "Loaded \(entry.fileName)"
         } catch {
-            statusText = "Save error: \(error.localizedDescription)"
+            statusText = "Load error: \(error.localizedDescription)"
         }
     }
 
-    private func storageDirectory() -> URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let folder = base.appendingPathComponent("Excalidraw", isDirectory: true)
-        if !FileManager.default.fileExists(atPath: folder.path) {
-            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    private func loadInitialScene() {
+        if let entry = documentManager.mostRecentEntry() {
+            open(entry: entry)
+            return
         }
-        return folder
-    }
-
-    private func sendLoadScene() {
         let docId = UUID().uuidString
         let payload: [String: Any] = [
             "docId": docId,
