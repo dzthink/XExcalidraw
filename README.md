@@ -35,5 +35,6 @@ npm run dev
 
 ## Native app integration notes
 
-- The native apps load `web/canvas-host/dist/index.html` when bundled with the app.
+- Add a Run Script build phase in the iOS/macOS targets that invokes `./scripts/build_web.sh` so the latest web build is copied into the app bundle resources.
+- The build script copies the `dist/` contents into the bundle resources root, so `Bundle.main.url(forResource: "index", withExtension: "html")` resolves on both platforms.
 - If the bundle does not contain the web build, the apps fall back to `http://localhost:5173` for development.
