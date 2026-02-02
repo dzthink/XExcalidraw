@@ -13,6 +13,10 @@ public final class FolderSourceStore: ObservableObject {
     private var activeURLs: [UUID: URL] = [:]
     private let indexStore: ExcalidrawFileIndexStore
     private let indexingQueue: DispatchQueue
+    private let fileCoordinator = NSFileCoordinator()
+    private var metadataQueries: [UUID: NSMetadataQuery] = [:]
+    private var metadataObservers: [UUID: [NSObjectProtocol]] = [:]
+    private var metadataRefreshWorkItems: [UUID: DispatchWorkItem] = [:]
 #if os(macOS)
     private var watchers: [UUID: DispatchSourceFileSystemObject] = [:]
     private var watcherDescriptors: [UUID: Int32] = [:]
@@ -42,11 +46,20 @@ public final class FolderSourceStore: ObservableObject {
         refreshIndex(for: source)
     }
 
+    @discardableResult
+    public func addICloudDocumentsFolder() throws -> Bool {
+        guard let url = defaultICloudDocumentsURL else { return false }
+        try ensureICloudDocumentsDirectoryExists(at: url)
+        try addFolder(url: url)
+        return true
+    }
+
     public func removeFolder(id: UUID) {
         if let url = activeURLs[id] {
             url.stopAccessingSecurityScopedResource()
             activeURLs[id] = nil
         }
+        stopMetadataQuery(id: id)
 #if os(macOS)
         stopWatching(id: id)
 #endif
@@ -139,6 +152,7 @@ public final class FolderSourceStore: ObservableObject {
         }
         if url.startAccessingSecurityScopedResource() {
             activeURLs[source.id] = url
+            startMetadataQueryIfNeeded(source: source, url: url)
 #if os(macOS)
             startWatching(source: source, url: url)
 #endif
@@ -188,6 +202,26 @@ public final class FolderSourceStore: ObservableObject {
     }
 
     private func scanFolder(source: FolderSource, url: URL) throws -> [ExcalidrawFileEntry] {
+        var coordinatedError: NSError?
+        var results: [ExcalidrawFileEntry] = []
+        fileCoordinator.coordinate(
+            readingItemAt: url,
+            options: [.withoutChanges],
+            error: &coordinatedError
+        ) { coordinatedURL in
+            do {
+                results = try scanFolderContents(source: source, url: coordinatedURL)
+            } catch {
+                coordinatedError = error as NSError
+            }
+        }
+        if let error = coordinatedError {
+            throw error
+        }
+        return results
+    }
+
+    private func scanFolderContents(source: FolderSource, url: URL) throws -> [ExcalidrawFileEntry] {
         let manager = FileManager.default
         guard manager.fileExists(atPath: url.path) else { return [] }
         var results: [ExcalidrawFileEntry] = []
@@ -237,6 +271,76 @@ public final class FolderSourceStore: ObservableObject {
             fileSize: fileSize
         )
         results.append(entry)
+    }
+
+    public var defaultICloudDocumentsURL: URL? {
+        guard let containerURL = FileManager.default.url(forUbiquityContainerIdentifier: nil) else {
+            return nil
+        }
+        return containerURL.appendingPathComponent("Documents", isDirectory: true)
+    }
+
+    private func ensureICloudDocumentsDirectoryExists(at url: URL) throws {
+        let manager = FileManager.default
+        guard !manager.fileExists(atPath: url.path) else { return }
+        try manager.createDirectory(at: url, withIntermediateDirectories: true, attributes: nil)
+    }
+
+    private func isICloudURL(_ url: URL) -> Bool {
+        guard let containerURL = FileManager.default.url(forUbiquityContainerIdentifier: nil) else {
+            return false
+        }
+        let basePath = containerURL.standardizedFileURL.path
+        let targetPath = url.standardizedFileURL.path
+        return targetPath.hasPrefix(basePath)
+    }
+
+    private func startMetadataQueryIfNeeded(source: FolderSource, url: URL) {
+        guard metadataQueries[source.id] == nil, isICloudURL(url) else { return }
+        let query = NSMetadataQuery()
+        query.searchScopes = [url]
+        query.predicate = NSPredicate(format: "%K ENDSWITH[c] %@", NSMetadataItemFSNameKey, ".excalidraw")
+        let notificationCenter = NotificationCenter.default
+        var observers: [NSObjectProtocol] = []
+        observers.append(notificationCenter.addObserver(
+            forName: .NSMetadataQueryDidFinishGathering,
+            object: query,
+            queue: .main
+        ) { [weak self] _ in
+            self?.scheduleMetadataRefresh(for: source)
+        })
+        observers.append(notificationCenter.addObserver(
+            forName: .NSMetadataQueryDidUpdate,
+            object: query,
+            queue: .main
+        ) { [weak self] _ in
+            self?.scheduleMetadataRefresh(for: source)
+        })
+        metadataObservers[source.id] = observers
+        metadataQueries[source.id] = query
+        query.start()
+    }
+
+    private func stopMetadataQuery(id: UUID) {
+        metadataRefreshWorkItems[id]?.cancel()
+        metadataRefreshWorkItems[id] = nil
+        if let observers = metadataObservers[id] {
+            observers.forEach { NotificationCenter.default.removeObserver($0) }
+        }
+        metadataObservers[id] = nil
+        if let query = metadataQueries[id] {
+            query.stop()
+        }
+        metadataQueries[id] = nil
+    }
+
+    private func scheduleMetadataRefresh(for source: FolderSource) {
+        metadataRefreshWorkItems[source.id]?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.refreshIndex(for: source)
+        }
+        metadataRefreshWorkItems[source.id] = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: workItem)
     }
 
     private func mergeEntries(
