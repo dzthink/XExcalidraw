@@ -40,6 +40,15 @@ struct FolderSourcesView: View {
                     Image(systemName: "plus")
                 }
             }
+            if store.defaultICloudDocumentsURL != nil {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        try? store.addICloudDocumentsFolder()
+                    } label: {
+                        Image(systemName: "icloud.and.arrow.down")
+                    }
+                }
+            }
         }
     }
 

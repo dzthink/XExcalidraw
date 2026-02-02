@@ -37,9 +37,17 @@ struct FolderSourcesView: View {
                         Image(systemName: "plus")
                     }
                 }
+                if store.defaultICloudDocumentsURL != nil {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button {
+                            try? store.addICloudDocumentsFolder()
+                        } label: {
+                            Image(systemName: "icloud.and.arrow.down")
+                        }
+                    }
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
-                        // TODO: Consider NSFileCoordinator on iOS for automatic file updates.
                         store.refreshAllIndexes()
                     } label: {
                         Image(systemName: "arrow.clockwise")
