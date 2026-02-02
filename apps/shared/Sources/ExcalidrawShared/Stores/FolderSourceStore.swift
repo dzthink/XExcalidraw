@@ -283,7 +283,7 @@ public final class FolderSourceStore: ObservableObject {
     }
 
     @discardableResult
-    public func updateEntryMetadata(for fileURL: URL) -> ExcalidrawFileEntry? {
+    public func updateEntryAfterSave(for fileURL: URL, date: Date = Date()) -> ExcalidrawFileEntry? {
         guard let index = indexedEntries.firstIndex(where: { $0.fileURL == fileURL }) else {
             return nil
         }
@@ -299,7 +299,7 @@ public final class FolderSourceStore: ObservableObject {
             fileURL: existing.fileURL,
             modifiedAt: modifiedAt,
             fileSize: fileSize,
-            lastOpenedAt: existing.lastOpenedAt,
+            lastOpenedAt: date,
             thumbnailPath: existing.thumbnailPath
         )
         indexedEntries[index] = updated
