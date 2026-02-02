@@ -7,4 +7,118 @@ body,
 
 .app-root {
   height: 100%;
+  position: relative;
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+}
+
+.ai-panel-trigger {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 10;
+  border: none;
+  border-radius: 999px;
+  background: #111827;
+  color: #fff;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.25);
+  cursor: pointer;
+}
+
+.ai-panel-trigger:hover {
+  background: #1f2937;
+}
+
+.ai-panel {
+  position: absolute;
+  top: 64px;
+  right: 16px;
+  width: 320px;
+  z-index: 10;
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.2);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+.ai-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.ai-panel-close {
+  border: none;
+  background: transparent;
+  font-size: 20px;
+  cursor: pointer;
+  color: #475569;
+}
+
+.ai-panel-empty {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px dashed rgba(148, 163, 184, 0.6);
+  color: #475569;
+}
+
+.ai-panel-empty h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.ai-panel-empty p {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ai-panel-empty-hint {
+  margin: 0;
+  color: #64748b;
+}
+
+.ai-panel-label {
+  display: block;
+  margin-top: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.ai-panel-input {
+  width: 100%;
+  min-height: 72px;
+  margin-top: 6px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  font-size: 12px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.ai-panel-action {
+  margin-top: 12px;
+  width: 100%;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #2563eb;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ai-panel-action:disabled {
+  background: #cbd5f5;
+  cursor: not-allowed;
 }

@@ -42,6 +42,11 @@ export type SaveScenePayload = {
   sceneJson: Record<string, unknown>;
 };
 
+export type RequestAIPayload = {
+  docId: string;
+  prompt?: string;
+};
+
 export type ExportResultPayload = {
   format: "png" | "svg" | "json";
   dataBase64: string;
@@ -55,4 +60,5 @@ export type NativeToWebMessage =
 export type WebToNativeMessage =
   | BridgeEnvelope<DidChangePayload>
   | BridgeEnvelope<SaveScenePayload>
+  | BridgeEnvelope<RequestAIPayload>
   | BridgeEnvelope<ExportResultPayload>;

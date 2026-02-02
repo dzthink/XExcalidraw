@@ -129,9 +129,11 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
     private let messageHandlerName = "bridge"
     private var didSendInitialScene = false
     private let documentManager: DocumentManager
+    private let aiModule: AIModule
 
-    init(documentManager: DocumentManager) {
+    init(documentManager: DocumentManager, aiModule: AIModule = EmptyAIModule()) {
         self.documentManager = documentManager
+        self.aiModule = aiModule
         let contentController = WKUserContentController()
         let config = WKWebViewConfiguration()
         config.userContentController = contentController
@@ -179,6 +181,8 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
             statusText = "Unsaved changes"
         } else if type == "exportResult" {
             handleExport(payload: payload)
+        } else if type == "requestAI" {
+            handleRequestAI(payload: payload)
         }
     }
 
@@ -202,6 +206,27 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
             presentSavePanel(data: exportData, suggestedName: fileName, contentType: exportType, initialDirectory: exportDirectory)
         } catch {
             statusText = "Export error: \(error.localizedDescription)"
+        }
+    }
+
+    private func handleRequestAI(payload: [String: Any]) {
+        let docId = payload["docId"] as? String ?? UUID().uuidString
+        let prompt = payload["prompt"] as? String
+        statusText = "Generating AI scene..."
+        aiModule.generateScene(docId: docId, prompt: prompt) { [weak self] result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let sceneJson):
+                    self?.send(type: "loadScene", payload: [
+                        "docId": docId,
+                        "sceneJson": sceneJson,
+                        "readOnly": false
+                    ])
+                    self?.statusText = "AI scene loaded"
+                case .failure(let error):
+                    self?.statusText = "AI error: \(error.localizedDescription)"
+                }
+            }
         }
     }
 

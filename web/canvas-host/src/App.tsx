@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import Excalidraw, {
+import {
+  Excalidraw,
   exportToBlob,
   exportToSvg,
   type ExcalidrawImperativeAPI
@@ -68,6 +69,8 @@ export default function App() {
     sceneJson: null,
     readOnly: false
   });
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState("");
   const saveTimeout = useRef<number | null>(null);
 
   const scheduleSave = useCallback(
@@ -181,6 +184,18 @@ export default function App() {
     []
   );
 
+  const requestAiScene = useCallback(() => {
+    if (!loadState.docId) {
+      return;
+    }
+    sendToNative(
+      sendEnvelope("requestAI", {
+        docId: loadState.docId,
+        prompt: aiPrompt.trim() ? aiPrompt.trim() : undefined
+      })
+    );
+  }, [aiPrompt, loadState.docId]);
+
   useEffect(() => {
     initializeBridge();
     return addBridgeListener((message) => {
@@ -215,6 +230,52 @@ export default function App() {
           scheduleSave(loadState.docId);
         }}
       />
+      <button
+        className="ai-panel-trigger"
+        type="button"
+        onClick={() => setAiPanelOpen((open) => !open)}
+        aria-expanded={aiPanelOpen}
+      >
+        AI
+      </button>
+      {aiPanelOpen ? (
+        <aside className="ai-panel" aria-label="AI 面板">
+          <div className="ai-panel-header">
+            <span>AI 面板</span>
+            <button
+              className="ai-panel-close"
+              type="button"
+              onClick={() => setAiPanelOpen(false)}
+              aria-label="关闭 AI 面板"
+            >
+              ×
+            </button>
+          </div>
+          <div className="ai-panel-empty">
+            <h3>AI 能力尚未接入</h3>
+            <p>这里将显示 AI 生成画布的结果预览与操作。</p>
+            <p className="ai-panel-empty-hint">目前支持发送提示词到 Native 层。</p>
+          </div>
+          <label className="ai-panel-label" htmlFor="ai-prompt">
+            提示词
+          </label>
+          <textarea
+            id="ai-prompt"
+            className="ai-panel-input"
+            placeholder="描述你想生成的画面..."
+            value={aiPrompt}
+            onChange={(event) => setAiPrompt(event.target.value)}
+          />
+          <button
+            className="ai-panel-action"
+            type="button"
+            onClick={requestAiScene}
+            disabled={!loadState.docId}
+          >
+            发送到 AI
+          </button>
+        </aside>
+      ) : null}
     </div>
   );
 }
