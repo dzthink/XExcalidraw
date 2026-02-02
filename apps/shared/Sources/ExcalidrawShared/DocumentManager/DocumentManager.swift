@@ -1,4 +1,5 @@
 import Combine
+import CryptoKit
 import Compression
 import Foundation
 
@@ -12,6 +13,12 @@ public struct DocumentScene {
         self.sceneJson = sceneJson
         self.readOnly = readOnly
     }
+}
+
+public struct DocumentDraft {
+    public let docId: String
+    public let sceneJson: Any
+    public let savedAt: Date
 }
 
 public enum DocumentIndexStatus: String {
@@ -29,14 +36,17 @@ public final class DocumentManager: ObservableObject {
     @Published public private(set) var indexStatus: DocumentIndexStatus = .idle
     @Published public private(set) var currentEntry: ExcalidrawFileEntry?
     @Published public var activeFolderId: UUID?
+    @Published public private(set) var pendingDraft: DocumentDraft?
 
     private let store: FolderSourceStore
     private let saveQueue: DispatchQueue
     private var cancellables: Set<AnyCancellable> = []
+    private let draftDirectory: URL
 
     public init(store: FolderSourceStore = FolderSourceStore()) {
         self.store = store
         self.saveQueue = DispatchQueue(label: "com.xexcalidraw.document-manager.save", qos: .utility)
+        self.draftDirectory = DocumentManager.makeDraftDirectory()
 
         store.$sources
             .receive(on: DispatchQueue.main)
@@ -49,6 +59,8 @@ public final class DocumentManager: ObservableObject {
                 self?.indexStatus = .idle
             }
             .store(in: &cancellables)
+
+        loadPendingDraft()
     }
 
     public var folderStore: FolderSourceStore {
@@ -122,10 +134,12 @@ public final class DocumentManager: ObservableObject {
         saveQueue.async { [weak self] in
             guard let self else { return }
             do {
+                self.writeDraft(docId: docId, sceneJson: sceneJson)
                 let targetURL = try self.resolveSaveURL(docId: docId)
                 let jsonData = try JSONSerialization.data(withJSONObject: sceneJson, options: [.prettyPrinted])
                 try jsonData.write(to: targetURL, options: [.atomic])
                 DispatchQueue.main.async {
+                    self.clearDraft(docId: docId)
                     let entry = self.updateIndexAfterSave(fileURL: targetURL)
                     if let entry {
                         completion(.success(entry))
@@ -139,6 +153,23 @@ public final class DocumentManager: ObservableObject {
                 }
             }
         }
+    }
+
+    public func discardPendingDraft() {
+        guard let pendingDraft else { return }
+        removeDraftFile(for: pendingDraft.docId)
+        DispatchQueue.main.async {
+            self.pendingDraft = nil
+        }
+    }
+
+    public func consumePendingDraft() -> DocumentDraft? {
+        guard let pendingDraft else { return nil }
+        removeDraftFile(for: pendingDraft.docId)
+        DispatchQueue.main.async {
+            self.pendingDraft = nil
+        }
+        return pendingDraft
     }
 
     private func resolveSaveURL(docId: String) throws -> URL {
@@ -200,6 +231,96 @@ public final class DocumentManager: ObservableObject {
         return nil
     }
 
+    private func loadPendingDraft() {
+        saveQueue.async { [weak self] in
+            guard let self else { return }
+            let urls = (try? FileManager.default.contentsOfDirectory(
+                at: self.draftDirectory,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            )) ?? []
+            let candidates = urls.filter { $0.pathExtension == "json" }
+            let sorted = candidates.sorted { lhs, rhs in
+                let lhsDate = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let rhsDate = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return lhsDate > rhsDate
+            }
+            for url in sorted {
+                if let draft = self.readDraft(from: url) {
+                    DispatchQueue.main.async {
+                        self.pendingDraft = draft
+                    }
+                    return
+                }
+            }
+        }
+    }
+
+    private func writeDraft(docId: String, sceneJson: Any) {
+        let payload: [String: Any] = [
+            "docId": docId,
+            "savedAt": ISO8601DateFormatter().string(from: Date()),
+            "sceneJson": sceneJson
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted]) else {
+            return
+        }
+        let fileURL = draftFileURL(for: docId)
+        do {
+            try FileManager.default.createDirectory(at: draftDirectory, withIntermediateDirectories: true)
+            try data.write(to: fileURL, options: [.atomic])
+            if let draft = readDraft(from: fileURL) {
+                DispatchQueue.main.async {
+                    self.pendingDraft = draft
+                }
+            }
+        } catch {
+            return
+        }
+    }
+
+    private func clearDraft(docId: String) {
+        removeDraftFile(for: docId)
+        DispatchQueue.main.async {
+            if self.pendingDraft?.docId == docId {
+                self.pendingDraft = nil
+            }
+        }
+    }
+
+    private func removeDraftFile(for docId: String) {
+        let fileURL = draftFileURL(for: docId)
+        try? FileManager.default.removeItem(at: fileURL)
+    }
+
+    private func readDraft(from url: URL) -> DocumentDraft? {
+        guard
+            let data = try? Data(contentsOf: url),
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let docId = json["docId"] as? String,
+            let sceneJson = json["sceneJson"]
+        else {
+            return nil
+        }
+        let savedAtString = json["savedAt"] as? String ?? ""
+        let savedAt = ISO8601DateFormatter().date(from: savedAtString) ?? Date()
+        return DocumentDraft(docId: docId, sceneJson: sceneJson, savedAt: savedAt)
+    }
+
+    private func draftFileURL(for docId: String) -> URL {
+        let hashed = Self.hashDocId(docId)
+        return draftDirectory.appendingPathComponent("\(hashed).json")
+    }
+
+    private static func hashDocId(_ docId: String) -> String {
+        let digest = SHA256.hash(data: Data(docId.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func makeDraftDirectory() -> URL {
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return base.appendingPathComponent("ExcalidrawDrafts", isDirectory: true)
     private func loadImportScene(from fileURL: URL) throws -> Any {
         let fileName = fileURL.lastPathComponent.lowercased()
         let fileExtension = fileURL.pathExtension.lowercased()
