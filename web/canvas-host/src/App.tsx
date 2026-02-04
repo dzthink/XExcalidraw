@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Excalidraw,
   exportToBlob,
   exportToSvg,
+  serializeAsJSON,
   type ExcalidrawImperativeAPI
 } from "@excalidraw/excalidraw";
 import "./excalidraw.css";
@@ -78,8 +79,22 @@ export default function App() {
   const didSendReady = useRef(false);
   const isApplyingScene = useRef(false);
 
+  const coerceSceneJson = useCallback((sceneJson: unknown) => {
+    if (typeof sceneJson === "string") {
+      try {
+        return JSON.parse(sceneJson) as Record<string, unknown>;
+      } catch {
+        return {};
+      }
+    }
+    if (sceneJson && typeof sceneJson === "object") {
+      return sceneJson as Record<string, unknown>;
+    }
+    return {};
+  }, []);
+
   const normalizeScene = useCallback((sceneJson: Record<string, unknown> | null) => {
-    const scene = sceneJson ?? {};
+    const scene = coerceSceneJson(sceneJson ?? {});
     const elements = Array.isArray(scene.elements) ? scene.elements : [];
     const appState =
       scene.appState && typeof scene.appState === "object" ? scene.appState : {};
@@ -90,7 +105,7 @@ export default function App() {
       appState,
       files
     } as Parameters<ExcalidrawImperativeAPI["updateScene"]>[0];
-  }, []);
+  }, [coerceSceneJson]);
 
   const scheduleSave = useCallback(
     (docId: string) => {
@@ -102,12 +117,24 @@ export default function App() {
         if (!api) {
           return;
         }
+        const elements = api.getSceneElements();
+        const appState = api.getAppState();
+        const files = api.getFiles();
+        let sceneJson: Record<string, unknown> = {
+          elements,
+          appState,
+          files
+        };
+        try {
+          sceneJson = JSON.parse(
+            serializeAsJSON(elements, appState, files, "local")
+          ) as Record<string, unknown>;
+        } catch {
+          // Fall back to the minimal payload if serialization fails.
+        }
         const payload: SaveScenePayload = {
           docId,
-          sceneJson: {
-            elements: api.getSceneElements(),
-            appState: api.getAppState()
-          }
+          sceneJson
         };
         sendToNative(sendEnvelope("saveScene", payload));
       }, SAVE_DEBOUNCE_MS);
@@ -123,24 +150,39 @@ export default function App() {
     []
   );
 
-  const applyScene = useCallback((sceneJson: Record<string, unknown> | null) => {
-    const api = excalidrawApi.current;
-    if (!api) {
-      return;
-    }
-    api.updateScene(normalizeScene(sceneJson));
-  }, [normalizeScene]);
+  const applyScene = useCallback(
+    (docId: string, sceneJson: Record<string, unknown> | null) => {
+      const api = excalidrawApi.current;
+      if (!api) {
+        return;
+      }
+      isApplyingScene.current = true;
+      api.updateScene(normalizeScene(sceneJson));
+      if (docId) {
+        sendToNative(
+          sendEnvelope("didChange", {
+            docId,
+            dirty: false
+          })
+        );
+      }
+      window.setTimeout(() => {
+        isApplyingScene.current = false;
+      }, 150);
+    },
+    [normalizeScene]
+  );
 
   const handleBridgeMessage = useCallback(
     async (message: { type: string; payload: unknown }) => {
       if (message.type === "loadScene") {
         const payload = message.payload as LoadScenePayload;
-        isApplyingScene.current = true;
         setLoadState({
           docId: payload.docId,
-          sceneJson: payload.sceneJson,
+          sceneJson: coerceSceneJson(payload.sceneJson),
           readOnly: payload.readOnly
         });
+        return;
       }
       if (message.type === "setAppState") {
         const api = excalidrawApi.current;
@@ -217,7 +259,7 @@ export default function App() {
         }
       }
     },
-    []
+    [coerceSceneJson]
   );
 
   const requestAiScene = useCallback(() => {
@@ -264,22 +306,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!isApiReady) {
+    if (!isApiReady || !loadState.docId) {
       return;
     }
-    isApplyingScene.current = true;
-    applyScene(loadState.sceneJson);
-    if (loadState.docId) {
-      sendToNative(
-        sendEnvelope("didChange", {
-          docId: loadState.docId,
-          dirty: false
-        })
-      );
-    }
-    window.setTimeout(() => {
-      isApplyingScene.current = false;
-    }, 150);
+    applyScene(loadState.docId, loadState.sceneJson);
   }, [applyScene, isApiReady, loadState.docId, loadState.sceneJson]);
 
   useEffect(() => {
@@ -297,12 +327,17 @@ export default function App() {
     sendToNative(sendEnvelope("webReady", { ready: true }));
   }, [isApiReady]);
 
+  const initialScene = useMemo(
+    () => normalizeScene(loadState.sceneJson),
+    [normalizeScene, loadState.sceneJson]
+  );
+
   return (
     <div className="app-root">
       <Excalidraw
         key={loadState.docId || "default"}
         ref={handleExcalidrawRef}
-        initialData={loadState.sceneJson ?? undefined}
+        initialData={initialScene}
         viewModeEnabled={loadState.readOnly}
         UIOptions={{
           canvasActions: {
