@@ -82,20 +82,10 @@ export default function App() {
   const coerceSceneJson = useCallback((sceneJson: unknown) => {
     if (typeof sceneJson === "string") {
       try {
-        const parsed = JSON.parse(sceneJson) as unknown;
-        if (Array.isArray(parsed)) {
-          return { elements: parsed };
-        }
-        if (parsed && typeof parsed === "object") {
-          return parsed as Record<string, unknown>;
-        }
-        return {};
+        return JSON.parse(sceneJson) as Record<string, unknown>;
       } catch {
         return {};
       }
-    }
-    if (Array.isArray(sceneJson)) {
-      return { elements: sceneJson };
     }
     if (sceneJson && typeof sceneJson === "object") {
       return sceneJson as Record<string, unknown>;
