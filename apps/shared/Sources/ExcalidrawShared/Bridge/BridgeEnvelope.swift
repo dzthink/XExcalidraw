@@ -1,6 +1,6 @@
 import Foundation
 
-public struct BridgeEnvelope<Payload: Codable>: Codable, Equatable {
+public struct BridgeEnvelope<Payload: Codable>: Codable {
     public let version: String
     public let type: String
     public let payload: Payload

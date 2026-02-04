@@ -43,7 +43,7 @@ struct FolderSourcesView: View {
             if store.defaultICloudDocumentsURL != nil {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
-                        try? store.addICloudDocumentsFolder()
+                        _ = try? store.addICloudDocumentsFolder()
                     } label: {
                         Image(systemName: "icloud.and.arrow.down")
                     }

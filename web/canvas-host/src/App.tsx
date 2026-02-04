@@ -5,6 +5,7 @@ import {
   exportToSvg,
   type ExcalidrawImperativeAPI
 } from "@excalidraw/excalidraw";
+import "./excalidraw.css";
 import {
   addBridgeListener,
   initializeBridge,
@@ -64,14 +65,32 @@ const getAppStateUpdate = (
 
 export default function App() {
   const excalidrawApi = useRef<ExcalidrawImperativeAPI | null>(null);
+  const [isApiReady, setIsApiReady] = useState(false);
   const [loadState, setLoadState] = useState<LoadState>({
     docId: "",
     sceneJson: null,
     readOnly: false
   });
+  const [fontsReady, setFontsReady] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
   const saveTimeout = useRef<number | null>(null);
+  const didSendReady = useRef(false);
+  const isApplyingScene = useRef(false);
+
+  const normalizeScene = useCallback((sceneJson: Record<string, unknown> | null) => {
+    const scene = sceneJson ?? {};
+    const elements = Array.isArray(scene.elements) ? scene.elements : [];
+    const appState =
+      scene.appState && typeof scene.appState === "object" ? scene.appState : {};
+    const files =
+      scene.files && typeof scene.files === "object" ? scene.files : {};
+    return {
+      elements,
+      appState,
+      files
+    } as Parameters<ExcalidrawImperativeAPI["updateScene"]>[0];
+  }, []);
 
   const scheduleSave = useCallback(
     (docId: string) => {
@@ -96,10 +115,27 @@ export default function App() {
     []
   );
 
+  const handleExcalidrawRef = useCallback(
+    (api: ExcalidrawImperativeAPI | null) => {
+      excalidrawApi.current = api;
+      setIsApiReady(Boolean(api));
+    },
+    []
+  );
+
+  const applyScene = useCallback((sceneJson: Record<string, unknown> | null) => {
+    const api = excalidrawApi.current;
+    if (!api) {
+      return;
+    }
+    api.updateScene(normalizeScene(sceneJson));
+  }, [normalizeScene]);
+
   const handleBridgeMessage = useCallback(
     async (message: { type: string; payload: unknown }) => {
       if (message.type === "loadScene") {
         const payload = message.payload as LoadScenePayload;
+        isApplyingScene.current = true;
         setLoadState({
           docId: payload.docId,
           sceneJson: payload.sceneJson,
@@ -203,10 +239,69 @@ export default function App() {
     });
   }, [handleBridgeMessage]);
 
+  useEffect(() => {
+    let didCancel = false;
+    const loadFonts = async () => {
+      try {
+        if (document.fonts) {
+          await Promise.all([
+            document.fonts.load("16px Excalifont"),
+            document.fonts.load("16px Assistant")
+          ]);
+          await document.fonts.ready;
+        }
+      } catch {
+        // Fall back to system fonts if custom fonts fail to load.
+      }
+      if (!didCancel) {
+        setFontsReady(true);
+      }
+    };
+    loadFonts();
+    return () => {
+      didCancel = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isApiReady) {
+      return;
+    }
+    isApplyingScene.current = true;
+    applyScene(loadState.sceneJson);
+    if (loadState.docId) {
+      sendToNative(
+        sendEnvelope("didChange", {
+          docId: loadState.docId,
+          dirty: false
+        })
+      );
+    }
+    window.setTimeout(() => {
+      isApplyingScene.current = false;
+    }, 150);
+  }, [applyScene, isApiReady, loadState.docId, loadState.sceneJson]);
+
+  useEffect(() => {
+    if (saveTimeout.current) {
+      window.clearTimeout(saveTimeout.current);
+      saveTimeout.current = null;
+    }
+  }, [loadState.docId]);
+
+  useEffect(() => {
+    if (!isApiReady || didSendReady.current) {
+      return;
+    }
+    didSendReady.current = true;
+    sendToNative(sendEnvelope("webReady", { ready: true }));
+  }, [isApiReady]);
+
   return (
     <div className="app-root">
       <Excalidraw
-        ref={excalidrawApi}
+        key={loadState.docId || "default"}
+        ref={handleExcalidrawRef}
         initialData={loadState.sceneJson ?? undefined}
         viewModeEnabled={loadState.readOnly}
         UIOptions={{
@@ -218,7 +313,11 @@ export default function App() {
           }
         }}
         onChange={() => {
-          if (!loadState.docId || loadState.readOnly) {
+          if (
+            !loadState.docId ||
+            loadState.readOnly ||
+            isApplyingScene.current
+          ) {
             return;
           }
           sendToNative(
@@ -230,6 +329,11 @@ export default function App() {
           scheduleSave(loadState.docId);
         }}
       />
+      {!fontsReady ? (
+        <div className="font-loading-overlay" aria-label="Loading fonts">
+          <div className="font-loading-card">Loading fonts…</div>
+        </div>
+      ) : null}
       <button
         className="ai-panel-trigger"
         type="button"

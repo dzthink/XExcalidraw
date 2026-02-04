@@ -2,7 +2,7 @@ import Foundation
 
 public struct FolderSource: Identifiable, Codable, Equatable {
     public let id: UUID
-    public let bookmarkData: Data
+    public var bookmarkData: Data
     public let displayName: String
     public let recursive: Bool
     public let addedAt: Date

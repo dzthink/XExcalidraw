@@ -1,3 +1,4 @@
+#if os(iOS)
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -44,3 +45,16 @@ struct FolderSourcePicker: UIViewControllerRepresentable {
         }
     }
 }
+#else
+import SwiftUI
+import ExcalidrawShared
+
+struct FolderSourcePicker: View {
+    let store: FolderSourceStore
+
+    var body: some View {
+        Text("Folder picker is available on iOS only.")
+            .padding()
+    }
+}
+#endif

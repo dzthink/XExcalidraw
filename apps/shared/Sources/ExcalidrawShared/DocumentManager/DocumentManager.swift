@@ -15,10 +15,14 @@ public struct DocumentScene {
     }
 }
 
-public struct DocumentDraft {
+public struct DocumentDraft: Equatable {
     public let docId: String
     public let sceneJson: Any
     public let savedAt: Date
+
+    public static func == (lhs: DocumentDraft, rhs: DocumentDraft) -> Bool {
+        lhs.docId == rhs.docId && lhs.savedAt == rhs.savedAt
+    }
 }
 
 public enum DocumentIndexStatus: String {
@@ -155,6 +159,53 @@ public final class DocumentManager: ObservableObject {
         }
     }
 
+    public func createBlankDocument(
+        completion: @escaping (Result<DocumentScene, Error>) -> Void
+    ) {
+        saveQueue.async { [weak self] in
+            guard let self else { return }
+            guard let (source, folderURL) = self.defaultFolderSource() else {
+                DispatchQueue.main.async {
+                    completion(.failure(DocumentManagerError.missingFolder))
+                }
+                return
+            }
+            let fileURL = self.makeUntitledFileURL(in: folderURL)
+            let sceneJson: [String: Any] = [
+                "elements": [],
+                "appState": [:]
+            ]
+            do {
+                let jsonData = try JSONSerialization.data(withJSONObject: sceneJson, options: [.prettyPrinted])
+                try jsonData.write(to: fileURL, options: [.atomic])
+                guard let entry = self.store.upsertEntry(
+                    for: fileURL,
+                    folderId: source.id,
+                    rootURL: folderURL,
+                    lastOpenedAt: Date()
+                ) else {
+                    DispatchQueue.main.async {
+                        completion(.failure(DocumentManagerError.unindexedFile))
+                    }
+                    return
+                }
+                DispatchQueue.main.async {
+                    self.currentEntry = entry
+                    self.activeFolderId = source.id
+                    completion(.success(DocumentScene(
+                        docId: entry.fileURL.path,
+                        sceneJson: sceneJson,
+                        readOnly: false
+                    )))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
     public func discardPendingDraft() {
         guard let pendingDraft else { return }
         removeDraftFile(for: pendingDraft.docId)
@@ -191,16 +242,20 @@ public final class DocumentManager: ObservableObject {
     }
 
     private func defaultFolderURL() -> URL? {
+        defaultFolderSource()?.1
+    }
+
+    private func defaultFolderSource() -> (FolderSource, URL)? {
         if let activeFolderId,
            let source = sources.first(where: { $0.id == activeFolderId }),
            let url = store.resolveURL(for: source) {
-            return url
+            return (source, url)
         }
-
-        guard let source = sources.first else {
+        guard let source = sources.first,
+              let url = store.resolveURL(for: source) else {
             return nil
         }
-        return store.resolveURL(for: source)
+        return (source, url)
     }
 
     private func updateIndexAfterSave(fileURL: URL) -> ExcalidrawFileEntry? {
@@ -321,6 +376,8 @@ public final class DocumentManager: ObservableObject {
         let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         return base.appendingPathComponent("ExcalidrawDrafts", isDirectory: true)
+    }
+
     private func loadImportScene(from fileURL: URL) throws -> Any {
         let fileName = fileURL.lastPathComponent.lowercased()
         let fileExtension = fileURL.pathExtension.lowercased()
@@ -348,6 +405,22 @@ public final class DocumentManager: ObservableObject {
         }
         let baseName = normalizedURL.lastPathComponent
         return baseName.isEmpty ? UUID().uuidString : baseName
+    }
+
+    private func makeUntitledFileURL(in folderURL: URL) -> URL {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let timestamp = formatter.string(from: Date())
+        let baseName = "Untitled-\(timestamp)"
+        var candidate = baseName
+        var counter = 1
+        var fileURL = folderURL.appendingPathComponent("\(candidate).excalidraw")
+        while FileManager.default.fileExists(atPath: fileURL.path) {
+            candidate = "\(baseName)-\(counter)"
+            counter += 1
+            fileURL = folderURL.appendingPathComponent("\(candidate).excalidraw")
+        }
+        return fileURL
     }
 
     private func parseSvgScene(from data: Data) throws -> Any {
@@ -494,7 +567,19 @@ public final class DocumentManager: ObservableObject {
                 throw DocumentManagerError.invalidImportData
             }
             let bufferSize = 64 * 1024
-            var stream = compression_stream()
+            let dummyDst = UnsafeMutablePointer<UInt8>.allocate(capacity: 1)
+            let dummySrc = UnsafeMutablePointer<UInt8>.allocate(capacity: 1)
+            defer {
+                dummyDst.deallocate()
+                dummySrc.deallocate()
+            }
+            var stream = compression_stream(
+                dst_ptr: dummyDst,
+                dst_size: 0,
+                src_ptr: UnsafePointer(dummySrc),
+                src_size: 0,
+                state: nil
+            )
             var status = compression_stream_init(&stream, COMPRESSION_STREAM_DECODE, COMPRESSION_ZLIB)
             guard status != COMPRESSION_STATUS_ERROR else {
                 throw DocumentManagerError.invalidImportData

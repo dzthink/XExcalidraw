@@ -1,0 +1,9 @@
+@import "@excalidraw/excalidraw/index.css";
+
+:root {
+  --xexcalidraw-styles-loaded: 1;
+}
+
+.excalidraw {
+  --xexcalidraw-styles-loaded: 1;
+}

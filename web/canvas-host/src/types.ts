@@ -47,6 +47,10 @@ export type RequestAIPayload = {
   prompt?: string;
 };
 
+export type WebReadyPayload = {
+  ready: boolean;
+};
+
 export type ExportResultPayload = {
   format: "png" | "svg" | "json";
   dataBase64: string;
@@ -61,4 +65,5 @@ export type WebToNativeMessage =
   | BridgeEnvelope<DidChangePayload>
   | BridgeEnvelope<SaveScenePayload>
   | BridgeEnvelope<RequestAIPayload>
+  | BridgeEnvelope<WebReadyPayload>
   | BridgeEnvelope<ExportResultPayload>;

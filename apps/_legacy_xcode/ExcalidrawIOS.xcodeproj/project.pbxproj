@@ -1,0 +1,447 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		3227B45D41BA44A89B71C539 /* ExcalidrawIOSUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 571AE7E091674394B55BC2CE /* ExcalidrawIOSUITests.swift */; };
+		E2DBB32BA6E14411A34183AF /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BCFE1216D57042EA94203199 /* XCTest.framework */; };
+		1568604A524B490CB4535FD3 /* ExcalidrawIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16697AA3196542C5A8D7C718 /* ExcalidrawIOSApp.swift */; };
+		73677D1DC4A94095B0B906DE /* FolderSourcesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 636BCB849FF549308CF31CDB /* FolderSourcesView.swift */; };
+		617D8488E10A4F1EAC655C44 /* FolderSourcePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98FEAD9D296249449CD0687E /* FolderSourcePicker.swift */; };
+		8C8558B8EEE14FD5A9D4C05C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5A57F24039A8417BB492BD72 /* Assets.xcassets */; };
+		6226E79502504E8C8F94BD98 /* ExcalidrawShared in Frameworks */ = {isa = PBXBuildFile; productRef = 78B62AC3B26A42D289DFBC35 /* ExcalidrawShared */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		571AE7E091674394B55BC2CE /* ExcalidrawIOSUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExcalidrawIOSUITests.swift; sourceTree = "<group>"; };
+		D6332BD051394DAB82EAFD53 /* ExcalidrawIOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = ExcalidrawIOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		BCFE1216D57042EA94203199 /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = System/Library/Frameworks/XCTest.framework; sourceTree = SDKROOT; };
+		16697AA3196542C5A8D7C718 /* ExcalidrawIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExcalidrawIOSApp.swift; sourceTree = "<group>"; };
+		636BCB849FF549308CF31CDB /* FolderSourcesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderSourcesView.swift; sourceTree = "<group>"; };
+		98FEAD9D296249449CD0687E /* FolderSourcePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderSourcePicker.swift; sourceTree = "<group>"; };
+		AE2C86738C2F40B8A322F98D /* ExcalidrawIOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ExcalidrawIOS.entitlements; sourceTree = "<group>"; };
+		51998FB11CB44AA594859F1F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		5A57F24039A8417BB492BD72 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		9209E259DC684189BB0526CC /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
+		48E4EAA90FFE455DA9FED063 /* ExcalidrawIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = ExcalidrawIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXContainerItemProxy section */
+		4817A64EC1FB46D5BE386540 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A991C5012A3F4FCF982C822C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 179C5053A07B4FA68866595F;
+			remoteInfo = ExcalidrawIOS;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		8B92108D910A48E093B7D5F0 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E2DBB32BA6E14411A34183AF /* XCTest.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E447642F4AA9411DB5E49318 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6226E79502504E8C8F94BD98 /* ExcalidrawShared in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		D4D23047B14F4E5AA199B7EB /* UITests */ = {
+			isa = PBXGroup;
+			children = (
+				ABB16D4B2BF64C8FA54C134C /* ExcalidrawIOSUITests */,
+			);
+			path = UITests;
+			sourceTree = "<group>";
+		};
+		ABB16D4B2BF64C8FA54C134C /* ExcalidrawIOSUITests */ = {
+			isa = PBXGroup;
+			children = (
+				571AE7E091674394B55BC2CE /* ExcalidrawIOSUITests.swift */,
+			);
+			path = ExcalidrawIOSUITests;
+			sourceTree = "<group>";
+		};
+		C269400C295D4ABF9A3F0C51 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				BCFE1216D57042EA94203199 /* XCTest.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		EF40FEB002DB4D988B0DE6C3 = {
+			isa = PBXGroup;
+			children = (
+				C6EDDD3385EF43DA82094900 /* ExcalidrawIOS */,
+				D4D23047B14F4E5AA199B7EB /* UITests */,
+				C269400C295D4ABF9A3F0C51 /* Frameworks */,
+				10E2D3AC318C49B5A9B8B94D /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		C6EDDD3385EF43DA82094900 /* ExcalidrawIOS */ = {
+			isa = PBXGroup;
+			children = (
+				E628807D636D43B2BCF335E9 /* App */,
+				F90478A285DF44D488FA4F96 /* Features */,
+				A05844A411714D4FBF5E3604 /* SupportingFiles */,
+				1948FF78F24D4E7BAC179CAF /* Resources */,
+			);
+			path = ../../apps/ios/Sources/ExcalidrawIOS;
+			sourceTree = "<group>";
+		};
+		E628807D636D43B2BCF335E9 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				16697AA3196542C5A8D7C718 /* ExcalidrawIOSApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		F90478A285DF44D488FA4F96 /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				E597C7915A614D549361FA69 /* FolderSources */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		E597C7915A614D549361FA69 /* FolderSources */ = {
+			isa = PBXGroup;
+			children = (
+				636BCB849FF549308CF31CDB /* FolderSourcesView.swift */,
+				98FEAD9D296249449CD0687E /* FolderSourcePicker.swift */,
+			);
+			path = FolderSources;
+			sourceTree = "<group>";
+		};
+		A05844A411714D4FBF5E3604 /* SupportingFiles */ = {
+			isa = PBXGroup;
+			children = (
+				AE2C86738C2F40B8A322F98D /* ExcalidrawIOS.entitlements */,
+				51998FB11CB44AA594859F1F /* Info.plist */,
+			);
+			path = ../../ios/SupportingFiles;
+			sourceTree = "<group>";
+		};
+		1948FF78F24D4E7BAC179CAF /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				5A57F24039A8417BB492BD72 /* Assets.xcassets */,
+				14E79CA6AD6243E191C37076 /* Preview Content */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		14E79CA6AD6243E191C37076 /* Preview Content */ = {
+			isa = PBXGroup;
+			children = (
+				9209E259DC684189BB0526CC /* Preview Assets.xcassets */,
+			);
+			path = "Preview Content";
+			sourceTree = "<group>";
+		};
+		10E2D3AC318C49B5A9B8B94D /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				48E4EAA90FFE455DA9FED063 /* ExcalidrawIOS.app */,
+				D6332BD051394DAB82EAFD53 /* ExcalidrawIOSUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0AB6EC06843145E1AC2819D2 /* ExcalidrawIOSUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5A64BC2130684396B5116EB4 /* Build configuration list for PBXNativeTarget "ExcalidrawIOSUITests" */;
+			buildPhases = (
+				D719187B74DE49D7A6DF6058 /* Sources */,
+				8B92108D910A48E093B7D5F0 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				25805CFEC5894A0A81C9C1A3 /* PBXTargetDependency */,
+			);
+			name = ExcalidrawIOSUITests;
+			productName = ExcalidrawIOSUITests;
+			productReference = D6332BD051394DAB82EAFD53 /* ExcalidrawIOSUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		179C5053A07B4FA68866595F /* ExcalidrawIOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 12BA83BBC975433988F3B9FF /* Build configuration list for PBXNativeTarget "ExcalidrawIOS" */;
+			buildPhases = (
+				E40B9D65C0B34CDC8F5B3D73 /* Sources */,
+				1A03978794BA465D9CB24377 /* Resources */,
+				8449FE9DB2814B53BF382302 /* Build Web */,
+				E447642F4AA9411DB5E49318 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ExcalidrawIOS;
+			packageProductDependencies = (
+				78B62AC3B26A42D289DFBC35 /* ExcalidrawShared */,
+			);
+			productName = ExcalidrawIOS;
+			productReference = 48E4EAA90FFE455DA9FED063 /* ExcalidrawIOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A991C5012A3F4FCF982C822C /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+			};
+			buildConfigurationList = DAFA1D14071440B48E95098E /* Build configuration list for PBXProject "ExcalidrawIOS" */;
+			compatibilityVersion = "Xcode 15.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = EF40FEB002DB4D988B0DE6C3;
+			packageReferences = (
+				FD09A7B0E6A14DF5A89EE299 /* ExcalidrawShared */,
+			);
+			productRefGroup = 10E2D3AC318C49B5A9B8B94D /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				179C5053A07B4FA68866595F /* ExcalidrawIOS */,
+				0AB6EC06843145E1AC2819D2 /* ExcalidrawIOSUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1A03978794BA465D9CB24377 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8C8558B8EEE14FD5A9D4C05C /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		8449FE9DB2814B53BF382302 /* Build Web */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Build Web";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ -x \\\"$SRCROOT/../../scripts/build_web.sh\\\" ]; then\n  \\\"$SRCROOT/../../scripts/build_web.sh\\\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		D719187B74DE49D7A6DF6058 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3227B45D41BA44A89B71C539 /* ExcalidrawIOSUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E40B9D65C0B34CDC8F5B3D73 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1568604A524B490CB4535FD3 /* ExcalidrawIOSApp.swift in Sources */,
+				73677D1DC4A94095B0B906DE /* FolderSourcesView.swift in Sources */,
+				617D8488E10A4F1EAC655C44 /* FolderSourcePicker.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		25805CFEC5894A0A81C9C1A3 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 179C5053A07B4FA68866595F /* ExcalidrawIOS */;
+			targetProxy = 4817A64EC1FB46D5BE386540 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		4A37F0BC5FAF42C493F8EAA7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Manual;
+CODE_SIGN_IDENTITY = -;
+CODE_SIGNING_ALLOWED = YES;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.xexcalidraw.iosuitests;
+				PRODUCT_NAME = ExcalidrawIOSUITests;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = ExcalidrawIOS;
+			};
+			name = Debug;
+		};
+		829EA86E00A84CF9A00F9B2D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Manual;
+CODE_SIGN_IDENTITY = -;
+CODE_SIGNING_ALLOWED = YES;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.xexcalidraw.iosuitests;
+				PRODUCT_NAME = ExcalidrawIOSUITests;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = ExcalidrawIOS;
+			};
+			name = Release;
+		};
+		4A50D3D07056413B9D9F5503 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.9;
+			};
+			name = Debug;
+		};
+		5D276A9AA8B840F49B147093 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.9;
+			};
+			name = Release;
+		};
+		36476147CAC545AEA08886BA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+								CODE_SIGN_STYLE = Manual;
+CODE_SIGN_IDENTITY = -;
+CODE_SIGNING_ALLOWED = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				INFOPLIST_FILE = ../../apps/ios/SupportingFiles/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.excalidraw.ios;
+				PRODUCT_NAME = ExcalidrawIOS;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		D9271113194242AA9D348666 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+								CODE_SIGN_STYLE = Manual;
+CODE_SIGN_IDENTITY = -;
+CODE_SIGNING_ALLOWED = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				INFOPLIST_FILE = ../../apps/ios/SupportingFiles/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.excalidraw.ios;
+				PRODUCT_NAME = ExcalidrawIOS;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		5A64BC2130684396B5116EB4 /* Build configuration list for PBXNativeTarget "ExcalidrawIOSUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4A37F0BC5FAF42C493F8EAA7 /* Debug */,
+				829EA86E00A84CF9A00F9B2D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DAFA1D14071440B48E95098E /* Build configuration list for PBXProject "ExcalidrawIOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4A50D3D07056413B9D9F5503 /* Debug */,
+				5D276A9AA8B840F49B147093 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		12BA83BBC975433988F3B9FF /* Build configuration list for PBXNativeTarget "ExcalidrawIOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				36476147CAC545AEA08886BA /* Debug */,
+				D9271113194242AA9D348666 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		FD09A7B0E6A14DF5A89EE299 /* ExcalidrawShared */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../apps/shared;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		78B62AC3B26A42D289DFBC35 /* ExcalidrawShared */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FD09A7B0E6A14DF5A89EE299 /* ExcalidrawShared */;
+			productName = ExcalidrawShared;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A991C5012A3F4FCF982C822C /* Project object */;
+}

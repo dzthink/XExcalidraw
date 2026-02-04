@@ -12,8 +12,11 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "ExcalidrawShared",
-            path: "Sources/ExcalidrawShared"
+            name: "ExcalidrawShared"
+        ),
+        .testTarget(
+            name: "ExcalidrawSharedTests",
+            dependencies: ["ExcalidrawShared"]
         )
     ]
 )

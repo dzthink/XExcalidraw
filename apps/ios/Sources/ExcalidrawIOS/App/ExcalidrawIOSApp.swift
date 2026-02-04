@@ -1,3 +1,4 @@
+#if os(iOS)
 import SwiftUI
 import ExcalidrawShared
 import UIKit
@@ -76,6 +77,14 @@ struct ContentView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
+                        viewModel.createNewDocument()
+                    } label: {
+                        Image(systemName: "doc.badge.plus")
+                    }
+                    .disabled(documentManager.sources.isEmpty)
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
                         isShowingPicker = true
                     } label: {
                         Image(systemName: "plus")
@@ -99,7 +108,7 @@ struct ContentView: View {
             ZStack {
                 WebCanvasView(webView: viewModel.webView)
                     .ignoresSafeArea()
-                if !viewModel.isWebViewReady {
+                if !viewModel.isCanvasReady {
                     VStack(spacing: 12) {
                         ProgressView()
                         Text("Loading canvas…")
@@ -122,6 +131,13 @@ struct ContentView: View {
                     Text(viewModel.statusText)
                         .font(.caption)
                         .foregroundStyle(.primary)
+                        .accessibilityIdentifier("canvas-status")
+                        .accessibilityLabel(viewModel.statusText)
+                    Text(viewModel.styleStatusText)
+                        .font(.caption2)
+                        .foregroundStyle(.clear)
+                        .accessibilityIdentifier("canvas-style-status")
+                        .accessibilityLabel(viewModel.styleStatusText)
                 }
                 .padding(8)
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
@@ -198,22 +214,35 @@ struct ContentView: View {
 }
 
 final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate, WKScriptMessageHandler {
-    @Published var statusText: String = "Ready"
+    @Published var statusText: String = "Loading canvas..."
     @Published var isWebViewReady = false
+    @Published var isCanvasReady = false
+    @Published var styleStatusText: String = "Styles loading..."
+    @Published var isStyleReady = false
     @Published var hasUnsavedChanges = false
     let webView: WKWebView
 
     private let messageHandlerName = "bridge"
     private var didSendInitialScene = false
     private var didStartLoading = false
+    private var readinessCheckAttempts = 0
+    private var readinessCheckWorkItem: DispatchWorkItem?
+    private let readinessCheckInterval: TimeInterval = 0.5
+    private let readinessCheckMaxAttempts = 20
+    private var styleCheckAttempts = 0
+    private var styleCheckWorkItem: DispatchWorkItem?
+    private let styleCheckInterval: TimeInterval = 0.5
+    private let styleCheckMaxAttempts = 20
     private let documentManager: DocumentManager
     private let aiModule: AIModule
+    private let schemeHandler = BundleSchemeHandler()
 
     init(documentManager: DocumentManager, aiModule: AIModule = EmptyAIModule()) {
         self.documentManager = documentManager
         self.aiModule = aiModule
         let contentController = WKUserContentController()
         let config = WKWebViewConfiguration()
+        config.setURLSchemeHandler(schemeHandler, forURLScheme: "app")
         config.userContentController = contentController
         self.webView = WKWebView(frame: .zero, configuration: config)
         super.init()
@@ -229,8 +258,17 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
         guard !didStartLoading else { return }
         didStartLoading = true
         isWebViewReady = false
-        if let url = Bundle.main.url(forResource: "index", withExtension: "html") {
-            webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        isCanvasReady = false
+        isStyleReady = false
+        readinessCheckAttempts = 0
+        readinessCheckWorkItem?.cancel()
+        styleCheckAttempts = 0
+        styleCheckWorkItem?.cancel()
+        statusText = "Loading canvas..."
+        styleStatusText = "Styles loading..."
+        if Bundle.main.url(forResource: "index", withExtension: "html") != nil,
+           let bundleURL = URL(string: "app:///index.html") {
+            webView.load(URLRequest(url: bundleURL))
         } else if let devURL = URL(string: "http://localhost:5173") {
             webView.load(URLRequest(url: devURL))
         }
@@ -241,6 +279,7 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
         didSendInitialScene = true
         isWebViewReady = true
         loadInitialScene()
+        scheduleCanvasReadinessCheck()
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -267,10 +306,96 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
             let dirty = payload["dirty"] as? Bool ?? true
             hasUnsavedChanges = dirty
             statusText = dirty ? "Unsaved changes" : "All changes saved"
+        } else if type == "webReady" {
+            markCanvasReady()
         } else if type == "exportResult" {
             handleExport(payload: payload)
         } else if type == "requestAI" {
             handleRequestAI(payload: payload)
+        }
+    }
+
+    private func markCanvasReady() {
+        isCanvasReady = true
+        statusText = "Canvas ready"
+        readinessCheckWorkItem?.cancel()
+        scheduleStyleReadinessCheck()
+    }
+
+    private func scheduleCanvasReadinessCheck() {
+        readinessCheckWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.checkCanvasReadiness()
+        }
+        readinessCheckWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + readinessCheckInterval, execute: workItem)
+    }
+
+    private func checkCanvasReadiness() {
+        guard !isCanvasReady else { return }
+        readinessCheckAttempts += 1
+        let js = "document.querySelector('canvas') !== null"
+        webView.evaluateJavaScript(js) { [weak self] result, _ in
+            guard let self else { return }
+            if let ready = result as? Bool, ready {
+                self.markCanvasReady()
+                return
+            }
+            if self.readinessCheckAttempts < self.readinessCheckMaxAttempts {
+                self.scheduleCanvasReadinessCheck()
+            } else {
+                self.statusText = "Canvas load timeout"
+            }
+        }
+    }
+
+    private func scheduleStyleReadinessCheck() {
+        guard !isStyleReady else { return }
+        styleCheckWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.checkStyleReadiness()
+        }
+        styleCheckWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + styleCheckInterval, execute: workItem)
+    }
+
+    private func checkStyleReadiness() {
+        guard !isStyleReady else { return }
+        styleCheckAttempts += 1
+        let js = """
+        (() => {
+          const cssVar = getComputedStyle(document.documentElement)
+            .getPropertyValue('--xexcalidraw-styles-loaded');
+          if (cssVar && cssVar.trim().length > 0) {
+            return true;
+          }
+          for (const sheet of Array.from(document.styleSheets)) {
+            try {
+              for (const rule of Array.from(sheet.cssRules || [])) {
+                if (rule.cssText && rule.cssText.includes('--xexcalidraw-styles-loaded')) {
+                  return true;
+                }
+              }
+            } catch {
+              continue;
+            }
+          }
+          return false;
+        })()
+        """
+        webView.evaluateJavaScript(js) { [weak self] result, _ in
+            guard let self else { return }
+            if let ready = result as? Bool, ready {
+                self.isStyleReady = true
+                self.styleStatusText = "Styles ready"
+                self.styleCheckWorkItem?.cancel()
+                return
+            }
+            if self.styleCheckAttempts < self.styleCheckMaxAttempts {
+                self.scheduleStyleReadinessCheck()
+            } else {
+                self.styleStatusText = "Styles load timeout"
+            }
         }
     }
 
@@ -384,6 +509,23 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
         }
     }
 
+    func createNewDocument() {
+        documentManager.createBlankDocument { [weak self] result in
+            switch result {
+            case .success(let scene):
+                self?.send(type: "loadScene", payload: [
+                    "docId": scene.docId,
+                    "sceneJson": scene.sceneJson,
+                    "readOnly": scene.readOnly
+                ])
+                self?.statusText = "Created new document"
+                self?.hasUnsavedChanges = false
+            case .failure(let error):
+                self?.statusText = "New document error: \(error.localizedDescription)"
+            }
+        }
+    }
+
     func open(entry: ExcalidrawFileEntry) {
         do {
             let scene = try documentManager.open(entry: entry)
@@ -440,6 +582,83 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
     }
 }
 
+final class BundleSchemeHandler: NSObject, WKURLSchemeHandler {
+    func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
+        guard let url = urlSchemeTask.request.url else {
+            urlSchemeTask.didFailWithError(NSError(domain: "BundleSchemeHandler", code: 1))
+            return
+        }
+        var resourcePath = ""
+        if let host = url.host, !host.isEmpty {
+            resourcePath = host
+        }
+        resourcePath += url.path
+        if resourcePath.hasPrefix("/") {
+            resourcePath.removeFirst()
+        }
+        if resourcePath.isEmpty {
+            resourcePath = "index.html"
+        }
+        guard
+            let baseURL = Bundle.main.resourceURL,
+            let data = try? Data(contentsOf: baseURL.appendingPathComponent(resourcePath))
+        else {
+            urlSchemeTask.didFailWithError(NSError(domain: "BundleSchemeHandler", code: 2))
+            return
+        }
+        let mimeType = mimeType(for: (resourcePath as NSString).pathExtension)
+        let textEncoding: String? = {
+            if mimeType.hasPrefix("text/") || mimeType == "application/javascript" || mimeType == "application/json" {
+                return "utf-8"
+            }
+            return nil
+        }()
+        let response = URLResponse(
+            url: url,
+            mimeType: mimeType,
+            expectedContentLength: data.count,
+            textEncodingName: textEncoding
+        )
+        urlSchemeTask.didReceive(response)
+        urlSchemeTask.didReceive(data)
+        urlSchemeTask.didFinish()
+    }
+
+    func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {
+    }
+
+    private func mimeType(for ext: String) -> String {
+        switch ext.lowercased() {
+        case "html":
+            return "text/html"
+        case "js":
+            return "application/javascript"
+        case "css":
+            return "text/css"
+        case "svg":
+            return "image/svg+xml"
+        case "png":
+            return "image/png"
+        case "jpg", "jpeg":
+            return "image/jpeg"
+        case "gif":
+            return "image/gif"
+        case "json", "map":
+            return "application/json"
+        case "wasm":
+            return "application/wasm"
+        case "woff2":
+            return "font/woff2"
+        case "woff":
+            return "font/woff"
+        case "ttf":
+            return "font/ttf"
+        default:
+            return "application/octet-stream"
+        }
+    }
+}
+
 struct WebCanvasView: UIViewRepresentable {
     let webView: WKWebView
 
@@ -449,3 +668,16 @@ struct WebCanvasView: UIViewRepresentable {
 
     func updateUIView(_ uiView: WKWebView, context: Context) {}
 }
+#else
+import SwiftUI
+
+@main
+struct ExcalidrawIOSApp: App {
+    var body: some Scene {
+        WindowGroup {
+            Text("Excalidraw iOS target is only available on iOS.")
+                .padding()
+        }
+    }
+}
+#endif

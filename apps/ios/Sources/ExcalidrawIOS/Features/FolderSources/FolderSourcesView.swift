@@ -1,3 +1,4 @@
+#if os(iOS)
 import SwiftUI
 
 import ExcalidrawShared
@@ -40,7 +41,7 @@ struct FolderSourcesView: View {
                 if store.defaultICloudDocumentsURL != nil {
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button {
-                            try? store.addICloudDocumentsFolder()
+                            _ = try? store.addICloudDocumentsFolder()
                         } label: {
                             Image(systemName: "icloud.and.arrow.down")
                         }
@@ -70,3 +71,13 @@ struct FolderSourcesView: View {
         }
     }
 }
+#else
+import SwiftUI
+
+struct FolderSourcesView: View {
+    var body: some View {
+        Text("Folder sources are available on iOS only.")
+            .padding()
+    }
+}
+#endif

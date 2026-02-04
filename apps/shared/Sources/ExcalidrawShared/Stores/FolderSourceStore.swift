@@ -39,7 +39,7 @@ public final class FolderSourceStore: ObservableObject {
     public func addFolder(url: URL) throws {
         let bookmarkData = try createBookmarkData(for: url)
         let displayName = url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent
-        let source = FolderSource(displayName: displayName, bookmarkData: bookmarkData, recursive: true)
+        let source = FolderSource(bookmarkData: bookmarkData, displayName: displayName, recursive: true)
         sources.append(source)
         persistSources()
         startAccessing(source: source)
@@ -70,20 +70,13 @@ public final class FolderSourceStore: ObservableObject {
     }
 
     public func resolveURL(for source: FolderSource) -> URL? {
-        var stale = false
-        guard let url = try? URL(
-            resolvingBookmarkData: source.bookmarkData,
-            options: bookmarkResolutionOptions,
-            relativeTo: nil,
-            bookmarkDataIsStale: &stale
-        ) else {
+        guard let result = resolveBookmark(for: source.bookmarkData) else {
             return nil
         }
-
+        let (url, stale) = result
         if stale, let updatedData = try? createBookmarkData(for: url) {
             updateBookmark(for: source.id, bookmarkData: updatedData)
         }
-
         return url
     }
 
@@ -166,12 +159,26 @@ public final class FolderSourceStore: ObservableObject {
                 url.stopAccessingSecurityScopedResource()
             }
         }
-
+        #if os(macOS)
+        if let data = try? url.bookmarkData(
+            options: bookmarkCreationOptions,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        ) {
+            return data
+        }
+        return try url.bookmarkData(
+            options: [],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+        #else
         return try url.bookmarkData(
             options: bookmarkCreationOptions,
             includingResourceValuesForKeys: nil,
             relativeTo: nil
         )
+        #endif
     }
 
     private func updateBookmark(for id: UUID, bookmarkData: Data) {
@@ -203,6 +210,7 @@ public final class FolderSourceStore: ObservableObject {
 
     private func scanFolder(source: FolderSource, url: URL) throws -> [ExcalidrawFileEntry] {
         var coordinatedError: NSError?
+        var scanError: NSError?
         var results: [ExcalidrawFileEntry] = []
         fileCoordinator.coordinate(
             readingItemAt: url,
@@ -212,10 +220,10 @@ public final class FolderSourceStore: ObservableObject {
             do {
                 results = try scanFolderContents(source: source, url: coordinatedURL)
             } catch {
-                coordinatedError = error as NSError
+                scanError = error as NSError
             }
         }
-        if let error = coordinatedError {
+        if let error = coordinatedError ?? scanError {
             throw error
         }
         return results
@@ -253,7 +261,10 @@ public final class FolderSourceStore: ObservableObject {
         itemURL: URL,
         results: inout [ExcalidrawFileEntry]
     ) throws {
-        guard itemURL.pathExtension.lowercased() == "excalidraw" else { return }
+        let fileName = itemURL.lastPathComponent.lowercased()
+        guard fileName.hasSuffix(".excalidraw") || fileName.hasSuffix(".excalidraw.json") else {
+            return
+        }
         let resourceValues = try itemURL.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey])
         guard resourceValues.isRegularFile ?? true else { return }
         let modifiedAt = resourceValues.contentModificationDate ?? Date()
@@ -299,7 +310,13 @@ public final class FolderSourceStore: ObservableObject {
         guard metadataQueries[source.id] == nil, isICloudURL(url) else { return }
         let query = NSMetadataQuery()
         query.searchScopes = [url]
-        query.predicate = NSPredicate(format: "%K ENDSWITH[c] %@", NSMetadataItemFSNameKey, ".excalidraw")
+        query.predicate = NSPredicate(
+            format: "%K ENDSWITH[c] %@ OR %K ENDSWITH[c] %@",
+            NSMetadataItemFSNameKey,
+            ".excalidraw",
+            NSMetadataItemFSNameKey,
+            ".excalidraw.json"
+        )
         let notificationCenter = NotificationCenter.default
         var observers: [NSObjectProtocol] = []
         observers.append(notificationCenter.addObserver(
@@ -418,7 +435,8 @@ public final class FolderSourceStore: ObservableObject {
         rootURL: URL,
         lastOpenedAt: Date? = nil
     ) -> ExcalidrawFileEntry? {
-        guard fileURL.pathExtension.lowercased() == "excalidraw" else { return nil }
+        let normalizedName = fileURL.lastPathComponent.lowercased()
+        guard normalizedName.hasSuffix(".excalidraw") || normalizedName.hasSuffix(".excalidraw.json") else { return nil }
         let resourceValues = try? fileURL.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey])
         guard resourceValues?.isRegularFile ?? true else { return nil }
         let modifiedAt = resourceValues?.contentModificationDate ?? Date()
@@ -500,13 +518,41 @@ public final class FolderSourceStore: ObservableObject {
 
     private var bookmarkCreationOptions: URL.BookmarkCreationOptions {
         #if os(iOS)
-        return [.minimalBookmark, .withSecurityScope]
+        return [.minimalBookmark]
         #else
         return [.withSecurityScope]
         #endif
     }
 
     private var bookmarkResolutionOptions: URL.BookmarkResolutionOptions {
+        #if os(iOS)
+        return []
+        #else
         return [.withSecurityScope]
+        #endif
+    }
+
+    private func resolveBookmark(for data: Data) -> (URL, Bool)? {
+        var stale = false
+        if let url = try? URL(
+            resolvingBookmarkData: data,
+            options: bookmarkResolutionOptions,
+            relativeTo: nil,
+            bookmarkDataIsStale: &stale
+        ) {
+            return (url, stale)
+        }
+        #if os(macOS)
+        var fallbackStale = false
+        if let url = try? URL(
+            resolvingBookmarkData: data,
+            options: [],
+            relativeTo: nil,
+            bookmarkDataIsStale: &fallbackStale
+        ) {
+            return (url, fallbackStale)
+        }
+        #endif
+        return nil
     }
 }
