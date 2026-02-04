@@ -224,6 +224,7 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
 
     private let messageHandlerName = "bridge"
     private var didSendInitialScene = false
+    private var isBridgeReady = false
     private var didStartLoading = false
     private var readinessCheckAttempts = 0
     private var readinessCheckWorkItem: DispatchWorkItem?
@@ -236,6 +237,7 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
     private let documentManager: DocumentManager
     private let aiModule: AIModule
     private let schemeHandler = BundleSchemeHandler()
+    private var pendingScenePayload: [String: Any]?
 
     init(documentManager: DocumentManager, aiModule: AIModule = EmptyAIModule()) {
         self.documentManager = documentManager
@@ -308,6 +310,8 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
             statusText = dirty ? "Unsaved changes" : "All changes saved"
         } else if type == "webReady" {
             markCanvasReady()
+            isBridgeReady = true
+            flushPendingSceneIfNeeded()
         } else if type == "exportResult" {
             handleExport(payload: payload)
         } else if type == "requestAI" {
@@ -476,7 +480,7 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
             DispatchQueue.main.async {
                 switch result {
                 case .success(let sceneJson):
-                    self?.send(type: "loadScene", payload: [
+                    self?.queueScenePayload([
                         "docId": docId,
                         "sceneJson": sceneJson,
                         "readOnly": false
@@ -513,7 +517,7 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
         documentManager.createBlankDocument { [weak self] result in
             switch result {
             case .success(let scene):
-                self?.send(type: "loadScene", payload: [
+                self?.queueScenePayload([
                     "docId": scene.docId,
                     "sceneJson": scene.sceneJson,
                     "readOnly": scene.readOnly
@@ -529,7 +533,7 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
     func open(entry: ExcalidrawFileEntry) {
         do {
             let scene = try documentManager.open(entry: entry)
-            send(type: "loadScene", payload: [
+            queueScenePayload([
                 "docId": scene.docId,
                 "sceneJson": scene.sceneJson,
                 "readOnly": scene.readOnly
@@ -552,19 +556,30 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
             "sceneJson": ["elements": [], "appState": [:]],
             "readOnly": false
         ]
-        send(type: "loadScene", payload: payload)
+        queueScenePayload(payload)
         statusText = "Loaded new scene"
         hasUnsavedChanges = false
     }
 
     func restoreDraft(_ draft: DocumentDraft) {
-        send(type: "loadScene", payload: [
+        queueScenePayload([
             "docId": draft.docId,
             "sceneJson": draft.sceneJson,
             "readOnly": false
         ])
         statusText = "Restored draft"
         hasUnsavedChanges = true
+    }
+
+    private func queueScenePayload(_ payload: [String: Any]) {
+        pendingScenePayload = payload
+        flushPendingSceneIfNeeded()
+    }
+
+    private func flushPendingSceneIfNeeded() {
+        guard isBridgeReady, let payload = pendingScenePayload else { return }
+        pendingScenePayload = nil
+        send(type: "loadScene", payload: payload)
     }
 
     private func send(type: String, payload: [String: Any]) {
