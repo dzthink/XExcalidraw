@@ -542,8 +542,20 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
             statusText = "Save failed"
             return
         }
+        let normalizedSceneJson: Any
+        if let sceneText = sceneJson as? String,
+           let sceneData = sceneText.data(using: .utf8),
+           let jsonObject = try? JSONSerialization.jsonObject(with: sceneData) {
+            normalizedSceneJson = jsonObject
+        } else {
+            normalizedSceneJson = sceneJson
+        }
+        guard JSONSerialization.isValidJSONObject(normalizedSceneJson) else {
+            statusText = "Save error: Invalid scene JSON"
+            return
+        }
 
-        documentManager.saveScene(docId: docId, sceneJson: sceneJson) { [weak self] result in
+        documentManager.saveScene(docId: docId, sceneJson: normalizedSceneJson) { [weak self] result in
             switch result {
             case .success(let entry):
                 self?.statusText = "Saved \(entry.fileName)"

@@ -120,17 +120,11 @@ export default function App() {
         const elements = api.getSceneElements();
         const appState = api.getAppState();
         const files = api.getFiles();
-        let sceneJson: Record<string, unknown> = {
-          elements,
-          appState,
-          files
-        };
+        let sceneJson: string;
         try {
-          sceneJson = JSON.parse(
-            serializeAsJSON(elements, appState, files, "local")
-          ) as Record<string, unknown>;
+          sceneJson = serializeAsJSON(elements, appState, files, "local");
         } catch {
-          // Fall back to the minimal payload if serialization fails.
+          return;
         }
         const payload: SaveScenePayload = {
           docId,
