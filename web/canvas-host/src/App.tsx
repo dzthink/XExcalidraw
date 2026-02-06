@@ -30,6 +30,16 @@ type LoadState = {
 
 const SAVE_DEBOUNCE_MS = 1000;
 
+const getInitialPreferredTheme = (): "light" | "dark" | null => {
+  if (window.__XEXCALIDRAW_THEME === "light" || window.__XEXCALIDRAW_THEME === "dark") {
+    return window.__XEXCALIDRAW_THEME;
+  }
+  if (window.matchMedia?.("(prefers-color-scheme: dark)").matches) {
+    return "dark";
+  }
+  return "light";
+};
+
 const getAppStateUpdate = (
   payload: SetAppStatePayload
 ): AppStateUpdate | null => {
@@ -66,6 +76,7 @@ const getAppStateUpdate = (
 
 export default function App() {
   const excalidrawApi = useRef<ExcalidrawImperativeAPI | null>(null);
+  const preferredThemeRef = useRef<"light" | "dark" | null>(getInitialPreferredTheme());
   const [isApiReady, setIsApiReady] = useState(false);
   const [loadState, setLoadState] = useState<LoadState>({
     docId: "",
@@ -96,8 +107,12 @@ export default function App() {
   const normalizeScene = useCallback((sceneJson: Record<string, unknown> | null) => {
     const scene = coerceSceneJson(sceneJson ?? {});
     const elements = Array.isArray(scene.elements) ? scene.elements : [];
-    const appState =
+    const appStateSource =
       scene.appState && typeof scene.appState === "object" ? scene.appState : {};
+    const appState: Record<string, unknown> = { ...appStateSource };
+    if (preferredThemeRef.current) {
+      appState.theme = preferredThemeRef.current;
+    }
     const files =
       scene.files && typeof scene.files === "object" ? scene.files : {};
     return {
@@ -202,6 +217,9 @@ export default function App() {
           return;
         }
         const payload = message.payload as SetAppStatePayload;
+        if (payload.theme === "light" || payload.theme === "dark") {
+          preferredThemeRef.current = payload.theme;
+        }
         const appStateUpdate = getAppStateUpdate(payload);
         if (!appStateUpdate) {
           return;
@@ -368,10 +386,12 @@ export default function App() {
         viewModeEnabled={loadState.readOnly}
         UIOptions={{
           canvasActions: {
+            changeViewBackgroundColor: false,
             loadScene: false,
             saveAsImage: false,
             export: false,
-            saveToActiveFile: false
+            saveToActiveFile: false,
+            toggleTheme: false
           }
         }}
         onChange={() => {

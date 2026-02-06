@@ -15,17 +15,18 @@ struct ExcalidrawMacApp: App {
 }
 
 struct ContentView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @StateObject private var documentManager: DocumentManager
     @StateObject private var viewModel: WebCanvasViewModel
     @State private var didStartUp = false
     @State private var isShowingDraftAlert = false
     @State private var pendingDraft: DocumentDraft?
     @State private var selectedEntryId: UUID?
-    @State private var entryToRename: ExcalidrawFileEntry?
-    @State private var newFileName: String = ""
-    @State private var isShowingRenameAlert = false
-    @State private var fileTreeRoot: FileTreeNode?
-    @State private var lastActiveFolderId: UUID?
+    @State private var editingEntryId: UUID?
+    @State private var editingFileName: String = ""
+    @State private var fileTreeRoots: [FileTreeNode] = []
+    @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
+    @State private var lastExpandedSidebarWidth: CGFloat = 280
 
     init() {
         let documentManager = DocumentManager()
@@ -35,29 +36,162 @@ struct ContentView: View {
         _viewModel = StateObject(wrappedValue: viewModel)
     }
     
-    private func updateFileTreeIfNeeded() {
-        guard let activeFolderId = documentManager.activeFolderId else {
-            fileTreeRoot = nil
-            lastActiveFolderId = nil
-            return
+    /// 重建所有文件树根节点
+    private func rebuildFileTrees() {
+        let sources = documentManager.sources
+        let entries = documentManager.indexedEntries
+        
+        var newRoots: [FileTreeNode] = []
+        for source in sources {
+            let sourceEntries = entries.filter { $0.folderId == source.id }
+            let folderPaths = collectRelativeFolderPaths(for: source)
+            let root = FileTreeBuilder.buildTree(
+                entries: sourceEntries,
+                folderName: source.displayName,
+                sourceId: source.id,
+                folderPaths: folderPaths
+            )
+            root.isExpanded = true
+            newRoots.append(root)
         }
         
-        // Only rebuild if folder changed or not built yet
-        if activeFolderId != lastActiveFolderId || fileTreeRoot == nil {
-            if let source = documentManager.sources.first(where: { $0.id == activeFolderId }) {
-                let entries = filteredEntries
-                fileTreeRoot = FileTreeBuilder.buildTree(
-                    entries: entries,
-                    folderName: source.displayName
-                )
-                lastActiveFolderId = activeFolderId
+        fileTreeRoots = newRoots
+    }
+
+    private func collectRelativeFolderPaths(for source: FolderSource) -> [String] {
+        guard let rootURL = documentManager.folderStore.resolveURL(for: source) else { return [] }
+        guard let enumerator = FileManager.default.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.isDirectoryKey, .isHiddenKey],
+            options: [.skipsPackageDescendants, .skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        var paths: [String] = []
+        for case let folderURL as URL in enumerator {
+            do {
+                let values = try folderURL.resourceValues(forKeys: [.isDirectoryKey, .isHiddenKey])
+                guard values.isDirectory == true, values.isHidden != true else { continue }
+                let relativePath = folderURL.path.replacingOccurrences(of: rootURL.path.appending("/"), with: "")
+                if !relativePath.isEmpty {
+                    paths.append(relativePath)
+                }
+            } catch {
+                continue
             }
+        }
+        return paths.sorted()
+    }
+
+    private func makeUntitledFileURL(in folderURL: URL) -> URL {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let timestamp = formatter.string(from: Date())
+        let baseName = "Untitled-\(timestamp)"
+        var candidate = baseName
+        var counter = 1
+        var fileURL = folderURL.appendingPathComponent("\(candidate).excalidraw")
+        while FileManager.default.fileExists(atPath: fileURL.path) {
+            candidate = "\(baseName)-\(counter)"
+            counter += 1
+            fileURL = folderURL.appendingPathComponent("\(candidate).excalidraw")
+        }
+        return fileURL
+    }
+
+    private func makeUntitledFolderURL(in folderURL: URL) -> URL {
+        let baseName = "New Folder"
+        var candidate = baseName
+        var counter = 2
+        var targetURL = folderURL.appendingPathComponent(candidate, isDirectory: true)
+        while FileManager.default.fileExists(atPath: targetURL.path) {
+            candidate = "\(baseName) \(counter)"
+            counter += 1
+            targetURL = folderURL.appendingPathComponent(candidate, isDirectory: true)
+        }
+        return targetURL
+    }
+
+    private func resolveFolderContext(for folderNode: FileTreeNode) -> (sourceId: UUID, rootURL: URL, folderURL: URL)? {
+        guard let sourceId = folderNode.sourceId,
+              let source = documentManager.sources.first(where: { $0.id == sourceId }),
+              let rootURL = documentManager.folderStore.resolveURL(for: source) else {
+            return nil
+        }
+        let folderURL: URL
+        if folderNode.path.isEmpty {
+            folderURL = rootURL
+        } else {
+            folderURL = rootURL.appendingPathComponent(folderNode.path, isDirectory: true)
+        }
+        return (sourceId: sourceId, rootURL: rootURL, folderURL: folderURL)
+    }
+
+    private func createFile(in folderNode: FileTreeNode) {
+        guard let context = resolveFolderContext(for: folderNode) else { return }
+        let sceneJson: [String: Any] = [
+            "elements": [],
+            "appState": [:]
+        ]
+        let fileURL = makeUntitledFileURL(in: context.folderURL)
+        do {
+            let jsonData = try JSONSerialization.data(withJSONObject: sceneJson, options: [.prettyPrinted])
+            try jsonData.write(to: fileURL, options: [.atomic])
+            if let entry = documentManager.folderStore.upsertEntry(
+                for: fileURL,
+                folderId: context.sourceId,
+                rootURL: context.rootURL,
+                lastOpenedAt: Date()
+            ) {
+                selectedEntryId = entry.id
+                viewModel.open(entry: entry)
+            }
+            documentManager.refreshIndexes()
+        } catch {
+            // Keep existing behavior: fail silently in the sidebar action.
+        }
+    }
+
+    private func createFolder(in folderNode: FileTreeNode) {
+        guard let context = resolveFolderContext(for: folderNode) else { return }
+        let folderURL = makeUntitledFolderURL(in: context.folderURL)
+        do {
+            try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: false)
+            folderNode.isExpanded = true
+            documentManager.refreshIndexes()
+        } catch {
+            // Keep existing behavior: fail silently in the sidebar action.
+        }
+    }
+
+    private func deleteFolderToTrash(_ folderNode: FileTreeNode) {
+        guard let context = resolveFolderContext(for: folderNode) else { return }
+        do {
+            _ = try FileManager.default.trashItem(at: context.folderURL, resultingItemURL: nil)
+            if folderNode.path.isEmpty {
+                removeFolderFromSidebar(context.sourceId)
+            } else {
+                if let selectedEntry = documentManager.indexedEntries.first(where: { $0.id == selectedEntryId }),
+                   selectedEntry.fileURL.path.hasPrefix(context.folderURL.path.appending("/")) {
+                    selectedEntryId = nil
+                }
+                documentManager.refreshIndexes()
+            }
+        } catch {
+            // Keep existing behavior: fail silently in the sidebar action.
         }
     }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $splitViewVisibility) {
             sidebarView
+                .navigationSplitViewColumnWidth(min: 40, ideal: lastExpandedSidebarWidth, max: 520)
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.preference(key: SidebarWidthPreferenceKey.self, value: proxy.size.width)
+                    }
+                )
         } detail: {
             ZStack {
                 WebCanvasView(webView: viewModel.webView)
@@ -80,17 +214,28 @@ struct ContentView: View {
             guard !didStartUp else { return }
             didStartUp = true
             viewModel.load()
-            ensureActiveFolder()
+        }
+        .onAppear {
+            // 初次显示时重建文件树
+            rebuildFileTrees()
+            viewModel.setPreferredTheme(colorScheme)
+        }
+        .onChange(of: documentManager.indexedEntries) { _ in
+            // 当索引条目变化时重建树
+            rebuildFileTrees()
         }
         .onChange(of: documentManager.sources) { _ in
-            ensureActiveFolder()
-            documentManager.refreshIndexes()
+            // 当 sources 变化时重建树
+            rebuildFileTrees()
         }
-        .onChange(of: documentManager.pendingDraft) { draft in
-            guard let draft else { return }
-            if pendingDraft == nil {
-                pendingDraft = draft
-                isShowingDraftAlert = true
+        .onChange(of: colorScheme) { newColorScheme in
+            viewModel.setPreferredTheme(newColorScheme)
+        }
+        .onPreferenceChange(SidebarWidthPreferenceKey.self) { width in
+            if !SidebarBehavior.shouldCollapse(width: width) {
+                lastExpandedSidebarWidth = width
+            } else if splitViewVisibility != .detailOnly {
+                splitViewVisibility = .detailOnly
             }
         }
         .alert("检测到未保存的内容", isPresented: $isShowingDraftAlert) {
@@ -111,35 +256,20 @@ struct ContentView: View {
                 Text("是否恢复临时保存的画布？")
             }
         }
-        .alert("重命名文件", isPresented: $isShowingRenameAlert) {
-            TextField("文件名", text: $newFileName)
-            Button("取消", role: .cancel) {
-                entryToRename = nil
-            }
-            Button("确定") {
-                if let entry = entryToRename {
-                    performRename(entry: entry, newName: newFileName)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        splitViewVisibility = splitViewVisibility == .detailOnly ? .all : .detailOnly
+                    }
+                } label: {
+                    Image(systemName: splitViewVisibility == .detailOnly ? "sidebar.left" : "sidebar.leading")
                 }
-                entryToRename = nil
+                .accessibilityIdentifier("sidebar-toggle-button")
+                .accessibilityLabel(splitViewVisibility == .detailOnly ? "Show navigation" : "Collapse navigation")
+                .help(splitViewVisibility == .detailOnly ? "Show navigation" : "Collapse navigation")
             }
-        } message: {
-            Text("输入新文件名")
         }
-    }
-
-    private var folderSelection: Binding<UUID?> {
-        Binding(
-            get: { documentManager.activeFolderId },
-            set: { newValue in
-                if let newValue {
-                    documentManager.activeFolderId = newValue
-                    return
-                }
-                if documentManager.sources.isEmpty {
-                    documentManager.activeFolderId = nil
-                }
-            }
-        )
     }
 
     private func openFolderPicker() {
@@ -157,22 +287,10 @@ struct ContentView: View {
             }
         }
     }
-
-    private func ensureActiveFolder() {
-        guard let activeFolderId = documentManager.activeFolderId else {
-            documentManager.activeFolderId = documentManager.sources.first?.id
-            return
-        }
-        if !documentManager.sources.contains(where: { $0.id == activeFolderId }) {
-            documentManager.activeFolderId = documentManager.sources.first?.id
-        }
-    }
-
-    private var filteredEntries: [ExcalidrawFileEntry] {
-        guard let activeFolderId = documentManager.activeFolderId else { return [] }
-        let entries = documentManager.indexedEntries.filter { $0.folderId == activeFolderId }
-        // Sort alphabetically by file name
-        return entries.sorted { $0.fileName.localizedStandardCompare($1.fileName) == .orderedAscending }
+    
+    /// 从侧边栏移除文件夹
+    private func removeFolderFromSidebar(_ folderId: UUID) {
+        documentManager.removeFolder(id: folderId)
     }
 
     private func deleteEntry(_ entry: ExcalidrawFileEntry) {
@@ -188,14 +306,13 @@ struct ContentView: View {
     }
 
     private func renameEntry(_ entry: ExcalidrawFileEntry) {
-        entryToRename = entry
-        newFileName = entry.fileName
-        isShowingRenameAlert = true
+        editingEntryId = entry.id
+        editingFileName = ExcalidrawFileName.displayName(from: entry.fileName)
     }
 
     private func performRename(entry: ExcalidrawFileEntry, newName: String) {
         guard !newName.isEmpty, newName != entry.fileName else { return }
-        let newFileName = newName.hasSuffix(".excalidraw") ? newName : "\(newName).excalidraw"
+        let newFileName = ExcalidrawFileName.normalizedFileName(from: newName)
         let newURL = entry.fileURL.deletingLastPathComponent().appendingPathComponent(newFileName)
         do {
             try FileManager.default.moveItem(at: entry.fileURL, to: newURL)
@@ -211,79 +328,95 @@ struct ContentView: View {
 
     @ViewBuilder
     private var sidebarView: some View {
-        // Update tree when needed
-        let _ = updateFileTreeIfNeeded()
-        
-        let base = List(selection: folderSelection) {
-            // Folders section - Apple Notes style
-            Section {
-                ForEach(documentManager.sources) { source in
-                    Label(source.displayName, systemImage: "folder.fill")
-                        .tag(source.id)
-                        .font(.body)
-                        .contextMenu {
-                            Button("Remove") {
-                                documentManager.removeFolder(id: source.id)
+        let base = List {
+            if fileTreeRoots.isEmpty {
+                // 没有文件夹时的提示
+                Section {
+                    VStack(alignment: .center, spacing: 12) {
+                        Image(systemName: "externaldrive.badge.plus")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.secondary)
+                        Text("Add a folder to start")
+                            .foregroundStyle(.secondary)
+                        Button("Add Folder") {
+                            openFolderPicker()
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 40)
+                }
+            } else {
+                // 显示所有根目录平铺
+                ForEach(fileTreeRoots) { root in
+                    RootFolderHeader(
+                        node: root,
+                        onCreateFile: {
+                            createFile(in: root)
+                        },
+                        onCreateFolder: {
+                            createFolder(in: root)
+                        },
+                        onDeleteFolder: {
+                            deleteFolderToTrash(root)
+                        },
+                        onRemove: {
+                            if let sourceId = root.sourceId {
+                                removeFolderFromSidebar(sourceId)
                             }
                         }
-                }
-            }
-            
-            // File tree section
-            if let root = fileTreeRoot {
-                Section {
+                    )
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                    .listRowSeparator(.hidden)
                     FileTreeContentView(
                         node: root,
                         selectedEntryId: $selectedEntryId,
+                        editingEntryId: $editingEntryId,
+                        editingFileName: $editingFileName,
                         onSelectFile: { entry in
                             viewModel.open(entry: entry)
                         },
                         onRename: { entry in
                             renameEntry(entry)
                         },
+                        onCommitRename: { entry, newName in
+                            performRename(entry: entry, newName: newName)
+                            editingEntryId = nil
+                            editingFileName = ""
+                        },
+                        onCancelRename: {
+                            editingEntryId = nil
+                            editingFileName = ""
+                        },
                         onDelete: { entry in
                             deleteEntry(entry)
+                        },
+                        onCreateFile: { node in
+                            createFile(in: node)
+                        },
+                        onCreateFolder: { node in
+                            createFolder(in: node)
+                        },
+                        onDeleteFolder: { node in
+                            deleteFolderToTrash(node)
                         }
                     )
-                } header: {
-                    Text("Documents")
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                    .listRowSeparator(.hidden)
                 }
             }
         }
         .listStyle(.sidebar)
-        .navigationTitle("Folders")
+        .accessibilityIdentifier("documents-sidebar")
+        .navigationTitle("Documents")
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    selectedEntryId = nil
-                    viewModel.createNewDocument()
-                } label: {
-                    Image(systemName: "square.and.pencil")
-                }
-                .disabled(documentManager.sources.isEmpty)
-                .help("New document")
-            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     openFolderPicker()
                 } label: {
-                    Image(systemName: "folder.badge.plus")
+                    Image(systemName: "externaldrive.badge.plus")
                 }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    documentManager.refreshIndexes()
-                    // Rebuild tree after refresh
-                    if let activeFolderId = documentManager.activeFolderId,
-                       let source = documentManager.sources.first(where: { $0.id == activeFolderId }) {
-                        fileTreeRoot = FileTreeBuilder.buildTree(
-                            entries: filteredEntries,
-                            folderName: source.displayName
-                        )
-                    }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
+                .help("Mount folder")
             }
         }
 
@@ -294,6 +427,124 @@ struct ContentView: View {
         }
     }
 }
+
+private struct SidebarWidthPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 280
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+enum ExcalidrawFileName {
+    static let fileExtension = ".excalidraw"
+
+    static func displayName(from fileName: String) -> String {
+        if fileName.hasSuffix(fileExtension) {
+            return String(fileName.dropLast(fileExtension.count))
+        }
+        return fileName
+    }
+
+    static func normalizedFileName(from input: String) -> String {
+        input.hasSuffix(fileExtension) ? input : "\(input)\(fileExtension)"
+    }
+}
+
+enum SidebarBehavior {
+    static let collapseThreshold: CGFloat = 50
+
+    static func shouldCollapse(width: CGFloat) -> Bool {
+        width < collapseThreshold
+    }
+}
+
+/// 根目录文件夹标题视图
+struct RootFolderHeader: View {
+    @ObservedObject var node: FileTreeNode
+    var onCreateFile: () -> Void
+    var onCreateFolder: () -> Void
+    var onDeleteFolder: () -> Void
+    var onRemove: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    node.isExpanded.toggle()
+                }
+            } label: {
+                Image(systemName: node.isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20, height: 28)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    node.isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "externaldrive.fill")
+                        .foregroundStyle(.secondary)
+                        .font(.system(size: 14))
+                    
+                    Text(node.name)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                    
+                    Spacer()
+                }
+                .foregroundStyle(.secondary)
+                .contentShape(Rectangle())
+                .padding(.vertical, 2)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 1)
+        .contextMenu {
+            Button {
+                onCreateFile()
+            } label: {
+                Label("Create File", systemImage: "doc.badge.plus")
+            }
+
+            Button {
+                onCreateFolder()
+            } label: {
+                Label("Create Folder", systemImage: "folder.badge.plus")
+            }
+
+            Divider()
+
+            Button(role: .destructive) {
+                onDeleteFolder()
+            } label: {
+                Label("Delete Folder", systemImage: "trash")
+            }
+
+            Divider()
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    node.isExpanded.toggle()
+                }
+            } label: {
+                Label(node.isExpanded ? "Collapse" : "Expand", systemImage: node.isExpanded ? "chevron.up" : "chevron.down")
+            }
+
+            Button {
+                onRemove()
+            } label: {
+                Label("Remove from Sidebar", systemImage: "minus.circle")
+            }
+        }
+    }
+}
+
+// MARK: - WebCanvasViewModel
 
 final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate, WKScriptMessageHandler {
     @Published var statusText: String = "Loading canvas..."
@@ -320,11 +571,20 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
     private let aiModule: AIModule
     private let schemeHandler = BundleSchemeHandler()
     private var pendingScenePayload: [String: Any]?
+    private var preferredTheme: String = "light"
 
     init(documentManager: DocumentManager, aiModule: AIModule = EmptyAIModule()) {
         self.documentManager = documentManager
         self.aiModule = aiModule
         let contentController = WKUserContentController()
+        self.preferredTheme = Self.currentSystemTheme()
+        let bootstrapScript = Self.makeThemeBootstrapScript(theme: preferredTheme)
+        let userScript = WKUserScript(
+            source: bootstrapScript,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        )
+        contentController.addUserScript(userScript)
         let config = WKWebViewConfiguration()
         config.setURLSchemeHandler(schemeHandler, forURLScheme: "app")
         config.userContentController = contentController
@@ -394,6 +654,11 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
             markCanvasReady()
             isBridgeReady = true
             flushPendingSceneIfNeeded()
+            sendThemeUpdate()
+            // Re-apply theme after first paint to avoid initial flash on cold starts.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                self?.sendThemeUpdate()
+            }
         } else if type == "exportResult" {
             handleExport(payload: payload)
         } else if type == "requestAI" {
@@ -617,8 +882,8 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
         }
     }
 
-    func createNewDocument() {
-        documentManager.createBlankDocument { [weak self] result in
+    func createNewDocument(in folderId: UUID? = nil) {
+        documentManager.createBlankDocument(in: folderId) { [weak self] result in
             switch result {
             case .success(let scene):
                 self?.queueScenePayload([
@@ -628,6 +893,7 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
                 ])
                 self?.statusText = "Created new document"
                 self?.hasUnsavedChanges = false
+                self?.sendThemeUpdate()
             case .failure(let error):
                 self?.statusText = "New document error: \(error.localizedDescription)"
             }
@@ -645,6 +911,7 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
             // If bridge is not ready, queue the payload; otherwise send immediately
             if isBridgeReady {
                 send(type: "loadScene", payload: payload)
+                sendThemeUpdate()
             } else {
                 queueScenePayload(payload)
             }
@@ -687,6 +954,12 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
         ])
         statusText = "Restored draft"
         hasUnsavedChanges = true
+        sendThemeUpdate()
+    }
+
+    func setPreferredTheme(_ colorScheme: ColorScheme) {
+        preferredTheme = colorScheme == .dark ? "dark" : "light"
+        sendThemeUpdate()
     }
 
     private func queueScenePayload(_ payload: [String: Any]) {
@@ -698,6 +971,42 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
         guard isBridgeReady, let payload = pendingScenePayload else { return }
         pendingScenePayload = nil
         send(type: "loadScene", payload: payload)
+        sendThemeUpdate()
+    }
+
+    private func sendThemeUpdate() {
+        guard isBridgeReady else { return }
+        send(type: "setAppState", payload: [
+            "theme": preferredTheme
+        ])
+    }
+
+    private static func currentSystemTheme() -> String {
+        let match = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua])
+        return match == .darkAqua ? "dark" : "light"
+    }
+
+    static func makeThemeBootstrapScript(theme: String) -> String {
+        let backgroundColor = theme == "dark" ? "#1e1e1e" : "#ffffff"
+        let colorScheme = theme == "dark" ? "dark" : "light"
+        return """
+        (() => {
+          window.__XEXCALIDRAW_THEME = "\(theme)";
+          const html = document.documentElement;
+          html.style.colorScheme = "\(colorScheme)";
+          html.style.backgroundColor = "\(backgroundColor)";
+          const applyBody = () => {
+            if (document.body) {
+              document.body.style.backgroundColor = "\(backgroundColor)";
+            }
+          };
+          if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", applyBody, { once: true });
+          } else {
+            applyBody();
+          }
+        })();
+        """
     }
 
     private func send(type: String, payload: [String: Any]) {

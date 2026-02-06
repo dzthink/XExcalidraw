@@ -30,4 +30,21 @@ final class ExcalidrawMacUITests: XCTestCase {
             XCTFail("Styles not ready. Current status: label=\(labelText) value=\(valueText)")
         }
     }
+
+    func testSidebarToggleButtonChangesAccessibilityLabel() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let toggleButton = app.buttons["sidebar-toggle-button"]
+        XCTAssertTrue(toggleButton.waitForExistence(timeout: 10))
+
+        let initialLabel = toggleButton.label
+        XCTAssertTrue(initialLabel == "Collapse navigation" || initialLabel == "Show navigation")
+
+        toggleButton.tap()
+
+        let toggledLabel = toggleButton.label
+        XCTAssertNotEqual(initialLabel, toggledLabel)
+        XCTAssertTrue(toggledLabel == "Collapse navigation" || toggledLabel == "Show navigation")
+    }
 }

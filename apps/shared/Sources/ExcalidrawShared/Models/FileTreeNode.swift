@@ -6,22 +6,29 @@ public class FileTreeNode: Identifiable, ObservableObject {
     public let path: String
     public let isFolder: Bool
     public let fileEntry: ExcalidrawFileEntry?
+    public let sourceId: UUID?  // 根目录对应的 FolderSource id
     @Published public var isExpanded: Bool
     @Published public var children: [FileTreeNode]
     
-    public init(name: String, path: String, isFolder: Bool, fileEntry: ExcalidrawFileEntry? = nil, isExpanded: Bool = false, children: [FileTreeNode] = []) {
+    public init(name: String, path: String, isFolder: Bool, fileEntry: ExcalidrawFileEntry? = nil, sourceId: UUID? = nil, isExpanded: Bool = false, children: [FileTreeNode] = []) {
         self.name = name
         self.path = path
         self.isFolder = isFolder
         self.fileEntry = fileEntry
+        self.sourceId = sourceId
         self.isExpanded = isExpanded
         self.children = children
     }
 }
 
 public class FileTreeBuilder {
-    public static func buildTree(entries: [ExcalidrawFileEntry], folderName: String) -> FileTreeNode {
-        let root = FileTreeNode(name: folderName, path: "", isFolder: true, isExpanded: true)
+    public static func buildTree(
+        entries: [ExcalidrawFileEntry],
+        folderName: String,
+        sourceId: UUID? = nil,
+        folderPaths: [String] = []
+    ) -> FileTreeNode {
+        let root = FileTreeNode(name: folderName, path: "", isFolder: true, sourceId: sourceId, isExpanded: true)
         
         // Group entries by their directory path
         var pathGroups: [String: [ExcalidrawFileEntry]] = [:]
@@ -32,6 +39,11 @@ public class FileTreeBuilder {
             pathGroups[normalizedPath, default: []].append(entry)
         }
         
+        // Include explicit folder paths so empty folders are also visible in the tree.
+        for folderPath in folderPaths {
+            pathGroups[folderPath, default: []] = pathGroups[folderPath, default: []]
+        }
+
         // Sort paths to ensure parent folders are created before children
         let sortedPaths = pathGroups.keys.sorted { $0 < $1 }
         
@@ -52,6 +64,7 @@ public class FileTreeBuilder {
                         name: component,
                         path: currentPath,
                         isFolder: true,
+                        sourceId: sourceId,
                         isExpanded: false
                     )
                     folderMap[currentPath] = newFolder
@@ -73,6 +86,7 @@ public class FileTreeBuilder {
                         path: file.relativePath,
                         isFolder: false,
                         fileEntry: file,
+                        sourceId: sourceId,
                         isExpanded: false
                     )
                     folder.children.append(fileNode)

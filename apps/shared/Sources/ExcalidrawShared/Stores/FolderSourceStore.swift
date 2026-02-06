@@ -36,7 +36,21 @@ public final class FolderSourceStore: ObservableObject {
         refreshAllIndexes()
     }
 
+    public enum FolderSourceError: Error {
+        case folderAlreadyExists
+    }
+    
     public func addFolder(url: URL) throws {
+        // 检查是否已添加过该目录（标准化路径后比较）
+        let standardizedPath = url.standardizedFileURL.path
+        for existingSource in sources {
+            if let existingURL = resolveURL(for: existingSource),
+               existingURL.standardizedFileURL.path == standardizedPath {
+                // 目录已存在，直接返回不做任何操作
+                return
+            }
+        }
+        
         let bookmarkData = try createBookmarkData(for: url)
         let displayName = url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent
         let source = FolderSource(bookmarkData: bookmarkData, displayName: displayName, recursive: true)
@@ -364,7 +378,11 @@ public final class FolderSourceStore: ObservableObject {
         _ newEntries: [ExcalidrawFileEntry],
         existingEntries: [ExcalidrawFileEntry]
     ) -> [ExcalidrawFileEntry] {
-        let existingLookup = Dictionary(uniqueKeysWithValues: existingEntries.map { ($0.fileURL, $0) })
+        // 使用 Dictionary 去重，保留最后出现的条目
+        var existingLookup: [URL: ExcalidrawFileEntry] = [:]
+        for entry in existingEntries {
+            existingLookup[entry.fileURL] = entry
+        }
         return newEntries.map { entry in
             guard let existing = existingLookup[entry.fileURL] else { return entry }
             return ExcalidrawFileEntry(

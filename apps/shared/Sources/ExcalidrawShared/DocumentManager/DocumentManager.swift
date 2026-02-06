@@ -160,17 +160,32 @@ public final class DocumentManager: ObservableObject {
     }
 
     public func createBlankDocument(
+        in folderId: UUID? = nil,
         completion: @escaping (Result<DocumentScene, Error>) -> Void
     ) {
         saveQueue.async { [weak self] in
             guard let self else { return }
-            guard let (source, folderURL) = self.defaultFolderSource() else {
+            
+            // 确定目标文件夹
+            let targetSource: FolderSource
+            let targetFolderURL: URL
+            
+            if let folderId = folderId,
+               let source = self.sources.first(where: { $0.id == folderId }),
+               let url = self.store.resolveURL(for: source) {
+                targetSource = source
+                targetFolderURL = url
+            } else if let (source, url) = self.defaultFolderSource() {
+                targetSource = source
+                targetFolderURL = url
+            } else {
                 DispatchQueue.main.async {
                     completion(.failure(DocumentManagerError.missingFolder))
                 }
                 return
             }
-            let fileURL = self.makeUntitledFileURL(in: folderURL)
+            
+            let fileURL = self.makeUntitledFileURL(in: targetFolderURL)
             let sceneJson: [String: Any] = [
                 "elements": [],
                 "appState": [:]
@@ -180,8 +195,8 @@ public final class DocumentManager: ObservableObject {
                 try jsonData.write(to: fileURL, options: [.atomic])
                 guard let entry = self.store.upsertEntry(
                     for: fileURL,
-                    folderId: source.id,
-                    rootURL: folderURL,
+                    folderId: targetSource.id,
+                    rootURL: targetFolderURL,
                     lastOpenedAt: Date()
                 ) else {
                     DispatchQueue.main.async {
@@ -191,7 +206,7 @@ public final class DocumentManager: ObservableObject {
                 }
                 DispatchQueue.main.async {
                     self.currentEntry = entry
-                    self.activeFolderId = source.id
+                    self.activeFolderId = targetSource.id
                     completion(.success(DocumentScene(
                         docId: entry.fileURL.path,
                         sceneJson: sceneJson,

@@ -13,7 +13,7 @@ body,
 
 .ai-panel-trigger {
   position: absolute;
-  top: 16px;
+  bottom: 16px;
   right: 16px;
   z-index: 10;
   border: none;
@@ -33,7 +33,7 @@ body,
 
 .ai-panel {
   position: absolute;
-  top: 64px;
+  bottom: 64px;
   right: 16px;
   width: 320px;
   z-index: 10;
@@ -144,4 +144,14 @@ body,
   font-weight: 600;
   letter-spacing: 0.02em;
   box-shadow: 0 6px 16px rgba(15, 23, 42, 0.25);
+}
+
+/* Remove Excalidraw top-left menu trigger completely. */
+.excalidraw .main-menu-trigger {
+  display: none !important;
+}
+
+/* Remove Excalidraw bottom-right help button. */
+.excalidraw .help-icon {
+  display: none !important;
 }

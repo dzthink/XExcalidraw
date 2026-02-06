@@ -1,4 +1,5 @@
 interface Window {
+  __XEXCALIDRAW_THEME?: "light" | "dark";
   webkit?: {
     messageHandlers?: {
       bridge?: {
