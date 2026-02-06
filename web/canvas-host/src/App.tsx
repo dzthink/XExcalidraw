@@ -3,9 +3,9 @@ import {
   Excalidraw,
   exportToBlob,
   exportToSvg,
-  serializeAsJSON,
-  type ExcalidrawImperativeAPI
+  serializeAsJSON
 } from "@excalidraw/excalidraw";
+import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import "./excalidraw.css";
 import {
   addBridgeListener,
@@ -28,7 +28,7 @@ type LoadState = {
   readOnly: boolean;
 };
 
-const SAVE_DEBOUNCE_MS = 3000;
+const SAVE_DEBOUNCE_MS = 1000;
 
 const getAppStateUpdate = (
   payload: SetAppStatePayload
@@ -126,6 +126,10 @@ export default function App() {
         } catch {
           return;
         }
+        // Only save if the docId still matches the current document
+        if (docId !== loadState.docId) {
+          return;
+        }
         const payload: SaveScenePayload = {
           docId,
           sceneJson
@@ -133,10 +137,10 @@ export default function App() {
         sendToNative(sendEnvelope("saveScene", payload));
       }, SAVE_DEBOUNCE_MS);
     },
-    []
+    [loadState.docId]
   );
 
-  const handleExcalidrawRef = useCallback(
+  const handleExcalidrawAPI = useCallback(
     (api: ExcalidrawImperativeAPI | null) => {
       excalidrawApi.current = api;
       setIsApiReady(Boolean(api));
@@ -151,6 +155,11 @@ export default function App() {
         return;
       }
       isApplyingScene.current = true;
+      // Clear any pending save before applying new scene
+      if (saveTimeout.current) {
+        window.clearTimeout(saveTimeout.current);
+        saveTimeout.current = null;
+      }
       api.updateScene(normalizeScene(sceneJson));
       if (docId) {
         sendToNative(
@@ -176,6 +185,15 @@ export default function App() {
           sceneJson: coerceSceneJson(payload.sceneJson),
           readOnly: payload.readOnly
         });
+        return;
+      }
+      if (message.type === "updateDocId") {
+        // Update docId without reloading scene (used after file rename)
+        const payload = message.payload as { docId: string };
+        setLoadState(prev => ({
+          ...prev,
+          docId: payload.docId
+        }));
         return;
       }
       if (message.type === "setAppState") {
@@ -270,9 +288,12 @@ export default function App() {
 
   useEffect(() => {
     initializeBridge();
-    return addBridgeListener((message) => {
+    const unsubscribe = addBridgeListener((message) => {
       handleBridgeMessage(message);
     });
+    return () => {
+      unsubscribe();
+    };
   }, [handleBridgeMessage]);
 
   useEffect(() => {
@@ -299,12 +320,25 @@ export default function App() {
     };
   }, []);
 
+  // Apply scene when docId changes (new document loaded)
   useEffect(() => {
     if (!isApiReady || !loadState.docId) {
       return;
     }
+    // Always apply scene when docId changes to ensure content is loaded
     applyScene(loadState.docId, loadState.sceneJson);
-  }, [applyScene, isApiReady, loadState.docId, loadState.sceneJson]);
+    // Reset the ready flag to allow sending ready message for new document
+    didSendReady.current = false;
+  }, [applyScene, isApiReady, loadState.docId]);
+
+  // Separate effect for sceneJson changes (e.g., from draft restore)
+  useEffect(() => {
+    if (!isApiReady || !loadState.docId || !loadState.sceneJson) {
+      return;
+    }
+    // Only apply if we haven't just loaded this doc (avoid double apply)
+    // This is handled by the separate docId effect above
+  }, [isApiReady, loadState.docId, loadState.sceneJson]);
 
   useEffect(() => {
     if (saveTimeout.current) {
@@ -321,17 +355,16 @@ export default function App() {
     sendToNative(sendEnvelope("webReady", { ready: true }));
   }, [isApiReady]);
 
-  const initialScene = useMemo(
-    () => normalizeScene(loadState.sceneJson),
-    [normalizeScene, loadState.sceneJson]
-  );
+  const initialScene = useMemo(() => {
+    return normalizeScene(loadState.sceneJson);
+  }, [normalizeScene, loadState.sceneJson]);
 
   return (
     <div className="app-root">
       <Excalidraw
         key={loadState.docId || "default"}
-        ref={handleExcalidrawRef}
-        initialData={initialScene}
+        excalidrawAPI={handleExcalidrawAPI}
+        initialData={initialScene as never}
         viewModeEnabled={loadState.readOnly}
         UIOptions={{
           canvasActions: {

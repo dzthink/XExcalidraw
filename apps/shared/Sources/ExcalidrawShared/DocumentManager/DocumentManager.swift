@@ -324,11 +324,8 @@ public final class DocumentManager: ObservableObject {
         do {
             try FileManager.default.createDirectory(at: draftDirectory, withIntermediateDirectories: true)
             try data.write(to: fileURL, options: [.atomic])
-            if let draft = readDraft(from: fileURL) {
-                DispatchQueue.main.async {
-                    self.pendingDraft = draft
-                }
-            }
+            // Don't update pendingDraft here - only load it at app launch
+            // This prevents the alert from showing during normal save operations
         } catch {
             return
         }

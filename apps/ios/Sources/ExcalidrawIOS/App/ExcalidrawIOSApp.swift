@@ -20,6 +20,12 @@ struct ContentView: View {
     @State private var didStartUp = false
     @State private var isShowingDraftAlert = false
     @State private var pendingDraft: DocumentDraft?
+    @State private var selectedEntryId: UUID?
+    @State private var entryToRename: ExcalidrawFileEntry?
+    @State private var newFileName: String = ""
+    @State private var isShowingRenameAlert = false
+    @State private var fileTreeRoot: FileTreeNode?
+    @State private var lastActiveFolderId: UUID?
 
     init() {
         let documentManager = DocumentManager()
@@ -28,55 +34,35 @@ struct ContentView: View {
         _documentManager = StateObject(wrappedValue: documentManager)
         _viewModel = StateObject(wrappedValue: viewModel)
     }
+    
+    private func updateFileTreeIfNeeded() {
+        guard let activeFolderId = documentManager.activeFolderId else {
+            fileTreeRoot = nil
+            lastActiveFolderId = nil
+            return
+        }
+        
+        // Only rebuild if folder changed or not built yet
+        if activeFolderId != lastActiveFolderId || fileTreeRoot == nil {
+            if let source = documentManager.sources.first(where: { $0.id == activeFolderId }) {
+                let entries = filteredEntries
+                fileTreeRoot = FileTreeBuilder.buildTree(
+                    entries: entries,
+                    folderName: source.displayName
+                )
+                lastActiveFolderId = activeFolderId
+            }
+        }
+    }
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $documentManager.activeFolderId) {
-                Section("Folders") {
-                    ForEach(documentManager.sources) { source in
-                        Text(source.displayName)
-                            .tag(source.id)
-                    }
-                    .onDelete(perform: deleteSources)
-                }
-                Section {
-                    if filteredEntries.isEmpty {
-                        Text(documentManager.activeFolderId == nil ? "Select a folder" : "No documents")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(filteredEntries) { entry in
-                            Button {
-                                viewModel.open(entry: entry)
-                            } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(entry.fileName)
-                                        .font(.headline)
-                                    if let lastOpenedAt = entry.lastOpenedAt {
-                                        Text("Last opened \(lastOpenedAt.formatted(date: .abbreviated, time: .shortened))")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    } else {
-                                        Text("Never opened")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Documents")
-                } footer: {
-                    Text("Index: \(documentManager.indexStatus.description)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            fileBrowserView
             .navigationTitle("Documents")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
+                        selectedEntryId = nil
                         viewModel.createNewDocument()
                     } label: {
                         Image(systemName: "doc.badge.plus")
@@ -121,28 +107,6 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("Excalidraw")
-            .overlay(alignment: .bottomLeading) {
-                VStack(alignment: .leading, spacing: 6) {
-                    if viewModel.hasUnsavedChanges {
-                        Label("未保存更改", systemImage: "exclamationmark.circle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    }
-                    Text(viewModel.statusText)
-                        .font(.caption)
-                        .foregroundStyle(.primary)
-                        .accessibilityIdentifier("canvas-status")
-                        .accessibilityLabel(viewModel.statusText)
-                    Text(viewModel.styleStatusText)
-                        .font(.caption2)
-                        .foregroundStyle(.clear)
-                        .accessibilityIdentifier("canvas-style-status")
-                        .accessibilityLabel(viewModel.styleStatusText)
-                }
-                .padding(8)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-                .padding()
-            }
         }
         .task {
             guard !didStartUp else { return }
@@ -179,6 +143,36 @@ struct ContentView: View {
                 Text("是否恢复临时保存的画布？")
             }
         }
+        .alert("重命名文件", isPresented: $isShowingRenameAlert) {
+            TextField("文件名", text: $newFileName)
+            Button("取消", role: .cancel) {
+                entryToRename = nil
+            }
+            Button("确定") {
+                if let entry = entryToRename {
+                    performRename(entry: entry, newName: newFileName)
+                }
+                entryToRename = nil
+            }
+        } message: {
+            Text("输入新文件名")
+        }
+    }
+
+    private func performRename(entry: ExcalidrawFileEntry, newName: String) {
+        guard !newName.isEmpty, newName != entry.fileName else { return }
+        let newFileName = newName.hasSuffix(".excalidraw") ? newName : "\(newName).excalidraw"
+        let newURL = entry.fileURL.deletingLastPathComponent().appendingPathComponent(newFileName)
+        do {
+            try FileManager.default.moveItem(at: entry.fileURL, to: newURL)
+            documentManager.folderStore.updateEntryAfterRename(id: entry.id, newFileURL: newURL, newFileName: newFileName)
+            // If the renamed file is currently open, reload it with the new docId
+            if selectedEntryId == entry.id {
+                viewModel.updateDocId(newURL.path)
+            }
+        } catch {
+            // Handle error silently
+        }
     }
 
     private func deleteSources(at offsets: IndexSet) {
@@ -202,13 +196,339 @@ struct ContentView: View {
         }
     }
 
+    private func deleteEntry(_ entry: ExcalidrawFileEntry) {
+        do {
+            try FileManager.default.removeItem(at: entry.fileURL)
+            documentManager.folderStore.removeEntry(id: entry.id)
+            if selectedEntryId == entry.id {
+                selectedEntryId = nil
+            }
+        } catch {
+            // Handle error silently
+        }
+    }
+
+    private func renameEntry(_ entry: ExcalidrawFileEntry) {
+        entryToRename = entry
+        newFileName = entry.fileName
+        isShowingRenameAlert = true
+    }
+
     private var filteredEntries: [ExcalidrawFileEntry] {
         guard let activeFolderId = documentManager.activeFolderId else { return [] }
         let entries = documentManager.indexedEntries.filter { $0.folderId == activeFolderId }
-        return entries.sorted {
-            let lhsDate = $0.lastOpenedAt ?? $0.modifiedAt
-            let rhsDate = $1.lastOpenedAt ?? $1.modifiedAt
-            return lhsDate > rhsDate
+        // Sort alphabetically by file name
+        return entries.sorted { $0.fileName.localizedStandardCompare($1.fileName) == .orderedAscending }
+    }
+
+    @ViewBuilder
+    private var fileBrowserView: some View {
+        // Update tree when needed
+        let _ = updateFileTreeIfNeeded()
+        
+        NavigationStack {
+            SidebarView(
+                sources: documentManager.sources,
+                activeFolderId: $documentManager.activeFolderId,
+                selectedEntryId: $selectedEntryId,
+                fileTreeRoot: fileTreeRoot,
+                onSelectFile: { entry in
+                    viewModel.open(entry: entry)
+                },
+                onRename: { entry in
+                    renameEntry(entry)
+                },
+                onDelete: { entry in
+                    deleteEntry(entry)
+                },
+                onRemoveFolder: { id in
+                    documentManager.removeFolder(id: id)
+                },
+                onRefresh: {
+                    documentManager.refreshIndexes()
+                    // Rebuild tree after refresh
+                    if let activeFolderId = documentManager.activeFolderId,
+                       let source = documentManager.sources.first(where: { $0.id == activeFolderId }) {
+                        fileTreeRoot = FileTreeBuilder.buildTree(
+                            entries: filteredEntries,
+                            folderName: source.displayName
+                        )
+                    }
+                }
+            )
+            .navigationTitle("Folders")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        selectedEntryId = nil
+                        viewModel.createNewDocument()
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .disabled(documentManager.sources.isEmpty)
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        isShowingPicker = true
+                    } label: {
+                        Image(systemName: "folder.badge.plus")
+                    }
+                }
+            }
+            .sheet(isPresented: $isShowingPicker) {
+                FolderSourcePicker(store: documentManager.folderStore)
+            }
+        }
+    }
+}
+
+// Apple Notes style sidebar
+struct SidebarView: View {
+    let sources: [FolderSource]
+    @Binding var activeFolderId: UUID?
+    @Binding var selectedEntryId: UUID?
+    let fileTreeRoot: FileTreeNode?
+    let onSelectFile: (ExcalidrawFileEntry) -> Void
+    let onRename: (ExcalidrawFileEntry) -> Void
+    let onDelete: (ExcalidrawFileEntry) -> Void
+    let onRemoveFolder: (UUID) -> Void
+    let onRefresh: () -> Void
+    
+    var body: some View {
+        List {
+            // All Folders section - Apple Notes style
+            Section {
+                ForEach(sources) { source in
+                    NavigationLink(value: source.id) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "folder.fill")
+                                .foregroundStyle(.orange)
+                                .font(.title3)
+                            Text(source.displayName)
+                                .font(.body)
+                            Spacer()
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            onRemoveFolder(source.id)
+                        } label: {
+                            Label("Remove", systemImage: "trash")
+                        }
+                    }
+                }
+            }
+            
+            // File list section
+            if let root = fileTreeRoot {
+                Section {
+                    FileTreeContentView(
+                        node: root,
+                        selectedEntryId: $selectedEntryId,
+                        onSelectFile: onSelectFile,
+                        onRename: onRename,
+                        onDelete: onDelete
+                    )
+                } header: {
+                    Text("Documents")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .listStyle(.sidebar)
+        .refreshable {
+            onRefresh()
+        }
+        .navigationDestination(for: UUID.self) { folderId in
+            // Navigate to folder content
+            FolderContentView(
+                folderId: folderId,
+                sources: sources,
+                selectedEntryId: $selectedEntryId,
+                fileTreeRoot: fileTreeRoot,
+                onSelectFile: onSelectFile,
+                onRename: onRename,
+                onDelete: onDelete
+            )
+        }
+    }
+}
+
+struct FolderContentView: View {
+    let folderId: UUID
+    let sources: [FolderSource]
+    @Binding var selectedEntryId: UUID?
+    let fileTreeRoot: FileTreeNode?
+    let onSelectFile: (ExcalidrawFileEntry) -> Void
+    let onRename: (ExcalidrawFileEntry) -> Void
+    let onDelete: (ExcalidrawFileEntry) -> Void
+    
+    var folderName: String {
+        sources.first { $0.id == folderId }?.displayName ?? "Folder"
+    }
+    
+    var body: some View {
+        List {
+            if let root = fileTreeRoot {
+                FileTreeContentView(
+                    node: root,
+                    selectedEntryId: $selectedEntryId,
+                    onSelectFile: onSelectFile,
+                    onRename: onRename,
+                    onDelete: onDelete
+                )
+            } else {
+                ContentUnavailableView("No Documents", systemImage: "doc.text.magnifyingglass")
+            }
+        }
+        .navigationTitle(folderName)
+    }
+}
+
+struct FileTreeContentView: View {
+    @ObservedObject var node: FileTreeNode
+    @Binding var selectedEntryId: UUID?
+    let onSelectFile: (ExcalidrawFileEntry) -> Void
+    let onRename: (ExcalidrawFileEntry) -> Void
+    let onDelete: (ExcalidrawFileEntry) -> Void
+    
+    var body: some View {
+        ForEach(node.children) { child in
+            if child.isFolder {
+                FolderNodeView(
+                    node: child,
+                    selectedEntryId: $selectedEntryId,
+                    onSelectFile: onSelectFile,
+                    onRename: onRename,
+                    onDelete: onDelete,
+                    level: 0
+                )
+            } else if let entry = child.fileEntry {
+                FileNodeView(
+                    entry: entry,
+                    isSelected: selectedEntryId == entry.id,
+                    onSelect: {
+                        selectedEntryId = entry.id
+                        onSelectFile(entry)
+                    },
+                    onRename: { onRename(entry) },
+                    onDelete: { onDelete(entry) },
+                    level: 0
+                )
+            }
+        }
+    }
+}
+
+struct FolderNodeView: View {
+    @ObservedObject var node: FileTreeNode
+    @Binding var selectedEntryId: UUID?
+    let onSelectFile: (ExcalidrawFileEntry) -> Void
+    let onRename: (ExcalidrawFileEntry) -> Void
+    let onDelete: (ExcalidrawFileEntry) -> Void
+    let level: Int
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Folder header with expand/collapse button
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    node.isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: node.isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 16)
+                    Image(systemName: "folder.fill")
+                        .foregroundStyle(.orange)
+                        .font(.body)
+                    Text(node.name)
+                        .font(.body)
+                    Spacer()
+                }
+                .foregroundStyle(.primary)
+                .contentShape(Rectangle())
+                .padding(.leading, CGFloat(level * 16))
+                .padding(.vertical, 2)
+            }
+            .buttonStyle(.plain)
+            
+            // Children
+            if node.isExpanded {
+                ForEach(node.children) { child in
+                    if child.isFolder {
+                        FolderNodeView(
+                            node: child,
+                            selectedEntryId: $selectedEntryId,
+                            onSelectFile: onSelectFile,
+                            onRename: onRename,
+                            onDelete: onDelete,
+                            level: level + 1
+                        )
+                    } else if let entry = child.fileEntry {
+                        FileNodeView(
+                            entry: entry,
+                            isSelected: selectedEntryId == entry.id,
+                            onSelect: {
+                                selectedEntryId = entry.id
+                                onSelectFile(entry)
+                            },
+                            onRename: { onRename(entry) },
+                            onDelete: { onDelete(entry) },
+                            level: level + 1
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct FileNodeView: View {
+    let entry: ExcalidrawFileEntry
+    let isSelected: Bool
+    let onSelect: () -> Void
+    let onRename: () -> Void
+    let onDelete: () -> Void
+    let level: Int
+    
+    var body: some View {
+        Button {
+            onSelect()
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "doc.text")
+                    .foregroundStyle(Color.accentColor)
+                    .font(.body)
+                Text(entry.fileName)
+                    .font(.body)
+                    .lineLimit(1)
+                Spacer()
+            }
+            .foregroundStyle(.primary)
+            .contentShape(Rectangle())
+            .padding(.leading, CGFloat(level * 16 + 20))
+            .padding(.vertical, 2)
+        }
+        .buttonStyle(.plain)
+        .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
+        .cornerRadius(6)
+        .contextMenu {
+            Button {
+                onRename()
+            } label: {
+                Label("Rename", systemImage: "pencil")
+            }
+            Divider()
+            Button(role: .destructive) {
+                onDelete()
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
         }
     }
 }
@@ -545,15 +865,29 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
     func open(entry: ExcalidrawFileEntry) {
         do {
             let scene = try documentManager.open(entry: entry)
-            queueScenePayload([
+            let payload: [String: Any] = [
                 "docId": scene.docId,
                 "sceneJson": scene.sceneJson,
                 "readOnly": scene.readOnly
-            ])
+            ]
+            // If bridge is not ready, queue the payload; otherwise send immediately
+            if isBridgeReady {
+                send(type: "loadScene", payload: payload)
+            } else {
+                queueScenePayload(payload)
+            }
             statusText = "Loaded \(entry.fileName)"
             hasUnsavedChanges = false
         } catch {
             statusText = "Load error: \(error.localizedDescription)"
+        }
+    }
+
+    func updateDocId(_ newDocId: String) {
+        // Send updateDocId message to WebView to update the current docId without reloading scene
+        let payload: [String: Any] = ["docId": newDocId]
+        if isBridgeReady {
+            send(type: "updateDocId", payload: payload)
         }
     }
 

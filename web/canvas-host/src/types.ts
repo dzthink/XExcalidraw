@@ -56,8 +56,13 @@ export type ExportResultPayload = {
   dataBase64: string;
 };
 
+export type UpdateDocIdPayload = {
+  docId: string;
+};
+
 export type NativeToWebMessage =
   | BridgeEnvelope<LoadScenePayload>
+  | BridgeEnvelope<UpdateDocIdPayload>
   | BridgeEnvelope<SetAppStatePayload>
   | BridgeEnvelope<RequestExportPayload>;
 

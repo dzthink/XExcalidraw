@@ -477,6 +477,29 @@ public final class FolderSourceStore: ObservableObject {
         return entry
     }
 
+    public func removeEntry(id: UUID) {
+        indexedEntries.removeAll { $0.id == id }
+        persistIndexEntries()
+    }
+
+    public func updateEntryAfterRename(id: UUID, newFileURL: URL, newFileName: String) {
+        guard let index = indexedEntries.firstIndex(where: { $0.id == id }) else { return }
+        let existing = indexedEntries[index]
+        let updated = ExcalidrawFileEntry(
+            id: existing.id,
+            folderId: existing.folderId,
+            relativePath: newFileURL.lastPathComponent,
+            fileName: newFileName,
+            fileURL: newFileURL,
+            modifiedAt: Date(),
+            fileSize: existing.fileSize,
+            lastOpenedAt: existing.lastOpenedAt,
+            thumbnailPath: existing.thumbnailPath
+        )
+        indexedEntries[index] = updated
+        persistIndexEntries()
+    }
+
 #if os(macOS)
     private func startWatching(source: FolderSource, url: URL) {
         guard watchers[source.id] == nil else { return }
