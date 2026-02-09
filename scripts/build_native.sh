@@ -182,6 +182,37 @@ write_ios_info_plist() {
   <string>$MARKETING_VERSION</string>
   <key>CFBundleVersion</key>
   <string>$BUILD_NUMBER</string>
+  <key>CFBundleIconName</key>
+  <string>AppIcon</string>
+  <key>CFBundleIcons</key>
+  <dict>
+    <key>CFBundlePrimaryIcon</key>
+    <dict>
+      <key>CFBundleIconName</key>
+      <string>AppIcon</string>
+      <key>CFBundleIconFiles</key>
+      <array>
+        <string>AppIcon60x60</string>
+      </array>
+      <key>UILaunchImages</key>
+      <array/>
+    </dict>
+  </dict>
+  <key>CFBundleIcons~ipad</key>
+  <dict>
+    <key>CFBundlePrimaryIcon</key>
+    <dict>
+      <key>CFBundleIconName</key>
+      <string>AppIcon</string>
+      <key>CFBundleIconFiles</key>
+      <array>
+        <string>AppIcon60x60</string>
+        <string>AppIcon76x76</string>
+      </array>
+      <key>UILaunchImages</key>
+      <array/>
+    </dict>
+  </dict>
   <key>LSRequiresIPhoneOS</key>
   <true/>
   <key>MinimumOSVersion</key>
@@ -230,6 +261,10 @@ write_macos_info_plist() {
   <string>$MARKETING_VERSION</string>
   <key>CFBundleVersion</key>
   <string>$BUILD_NUMBER</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
+  <key>CFBundleIconName</key>
+  <string>AppIcon</string>
   <key>LSMinimumSystemVersion</key>
   <string>13.0</string>
   <key>NSPrincipalClass</key>
@@ -237,6 +272,71 @@ write_macos_info_plist() {
 </dict>
 </plist>
 PLIST
+}
+
+compile_assets() {
+  local xcassets_path="$1"
+  local output_dir="$2"
+  local platform="$3"
+  local min_version="$4"
+  
+  if [[ ! -d "$xcassets_path" ]]; then
+    return 0
+  fi
+  
+  echo "==> Compiling Assets.xcassets ($platform)"
+  mkdir -p "$output_dir"
+  
+  xcrun actool \
+    --compile "$output_dir" \
+    --platform "$platform" \
+    --minimum-deployment-target "$min_version" \
+    --app-icon AppIcon \
+    --output-partial-info-plist "$output_dir/Assets-partial.plist" \
+    "$xcassets_path" 2>&1 | grep -v "^-" || true
+  
+  # For macOS, also generate a proper .icns file with all sizes using iconutil
+  if [[ "$platform" == "macosx" ]]; then
+    generate_macos_icns "$xcassets_path" "$output_dir"
+  fi
+}
+
+generate_macos_icns() {
+  local xcassets_path="$1"
+  local output_dir="$2"
+  local iconset_dir="/tmp/AppIcon.iconset"
+  
+  rm -rf "$iconset_dir"
+  mkdir -p "$iconset_dir"
+  
+  # Get the appiconset path
+  local appiconset_path="$xcassets_path/AppIcon.appiconset"
+  
+  # Copy and rename icon files to iconset format
+  # macOS icon sizes: 16x16, 32x32, 128x128, 256x256, 512x512 (each with 1x and 2x)
+  local sizes=("16" "32" "128" "256" "512")
+  
+  for size in "${sizes[@]}"; do
+    local file1x="$appiconset_path/${size}.png"
+    local file2x="$appiconset_path/${size}@2x.png"
+    
+    if [[ -f "$file1x" ]]; then
+      cp "$file1x" "$iconset_dir/icon_${size}x${size}.png"
+    fi
+    if [[ -f "$file2x" ]]; then
+      cp "$file2x" "$iconset_dir/icon_${size}x${size}@2x.png"
+    fi
+  done
+  
+  # Generate .icns file
+  if command -v iconutil &> /dev/null; then
+    iconutil -c icns "$iconset_dir" -o "$output_dir/AppIcon.icns"
+    echo "Generated AppIcon.icns with all sizes"
+  else
+    echo "iconutil not available, using actool generated icns"
+  fi
+  
+  rm -rf "$iconset_dir"
 }
 
 copy_resource_bundles() {
@@ -282,6 +382,13 @@ bundle_ios_app() {
   chmod +x "$app_dir/$IOS_TARGET"
   write_ios_info_plist "$app_dir/Info.plist"
   copy_resource_bundles "$bin_path" "$app_dir"
+  
+  # Compile Assets.xcassets if exists
+  local xcassets_path="$IOS_PACKAGE/Sources/ExcalidrawIOS/Resources/Assets.xcassets"
+  if [[ -d "$xcassets_path" ]]; then
+    compile_assets "$xcassets_path" "$app_dir" "iphonesimulator" "$IOS_VERSION"
+  fi
+  
   copy_web_dist "$app_dir"
   echo "iOS app bundle: $app_dir"
 
@@ -307,6 +414,13 @@ bundle_macos_app() {
   chmod +x "$macos_dir/$MAC_TARGET"
   write_macos_info_plist "$contents_dir/Info.plist"
   copy_resource_bundles "$bin_path" "$resources_dir"
+  
+  # Compile Assets.xcassets if exists
+  local xcassets_path="$MAC_PACKAGE/Sources/ExcalidrawMac/Resources/Assets.xcassets"
+  if [[ -d "$xcassets_path" ]]; then
+    compile_assets "$xcassets_path" "$resources_dir" "macosx" "13.0"
+  fi
+  
   copy_web_dist "$resources_dir"
   echo "macOS app bundle: $app_dir"
 }
