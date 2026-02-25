@@ -78,4 +78,57 @@ export function initializeBridge() {
         }
       };
   }
+
+  // Monitor cursor changes and notify native layer
+  initializeCursorTracking();
+}
+
+function initializeCursorTracking() {
+  let lastCursor = "";
+
+  // Helper to get the current effective cursor
+  const getCurrentCursor = (): string => {
+    // Check the element under the mouse first
+    const hoveredElement = document.querySelector(".excalidraw canvas:hover") as HTMLElement | null;
+    if (hoveredElement) {
+      return getComputedStyle(hoveredElement).cursor;
+    }
+    // Check canvas element
+    const canvas = document.querySelector(".excalidraw canvas") as HTMLElement | null;
+    if (canvas) {
+      const cursor = getComputedStyle(canvas).cursor;
+      if (cursor && cursor !== "auto") {
+        return cursor;
+      }
+    }
+    // Check excalidraw container
+    const excalidraw = document.querySelector(".excalidraw") as HTMLElement | null;
+    if (excalidraw) {
+      return getComputedStyle(excalidraw).cursor;
+    }
+    // Default to body cursor
+    return getComputedStyle(document.body).cursor;
+  };
+
+  // Check cursor on mouse move
+  document.addEventListener("mousemove", () => {
+    const cursor = getCurrentCursor();
+    if (cursor !== lastCursor) {
+      lastCursor = cursor;
+      postToNative(
+        sendEnvelope("cursorChanged", { cursor })
+      );
+    }
+  }, { passive: true });
+
+  // Also check periodically to catch cursor changes from interactions
+  setInterval(() => {
+    const cursor = getCurrentCursor();
+    if (cursor !== lastCursor) {
+      lastCursor = cursor;
+      postToNative(
+        sendEnvelope("cursorChanged", { cursor })
+      );
+    }
+  }, 50);
 }

@@ -41,6 +41,20 @@ public final class DocumentManager: ObservableObject {
     @Published public private(set) var currentEntry: ExcalidrawFileEntry?
     @Published public var activeFolderId: UUID?
     @Published public private(set) var pendingDraft: DocumentDraft?
+    
+    public var hasActiveSource: Bool {
+        store.activeSource != nil
+    }
+    
+    public var activeSource: FolderSource? {
+        store.activeSource
+    }
+    
+    public var activeSourceEntries: [ExcalidrawFileEntry] {
+        store.activeSourceEntries.sorted {
+            ($0.lastOpenedAt ?? $0.modifiedAt) > ($1.lastOpenedAt ?? $1.modifiedAt)
+        }
+    }
 
     private let store: FolderSourceStore
     private let saveQueue: DispatchQueue
@@ -55,6 +69,10 @@ public final class DocumentManager: ObservableObject {
         store.$sources
             .receive(on: DispatchQueue.main)
             .assign(to: &$sources)
+        
+        store.$activeSourceId
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$activeFolderId)
 
         store.$indexedEntries
             .receive(on: DispatchQueue.main)
@@ -78,6 +96,15 @@ public final class DocumentManager: ObservableObject {
     public func removeFolder(id: UUID) {
         store.removeFolder(id: id)
     }
+    
+    public func switchToSource(id: UUID) {
+        store.switchToSource(id: id)
+        currentEntry = nil
+    }
+    
+    public func getSourceHistory() -> [FolderSource] {
+        store.getSourceHistory()
+    }
 
     public func refreshIndexes() {
         indexStatus = .refreshing
@@ -92,6 +119,10 @@ public final class DocumentManager: ObservableObject {
         currentEntry = updatedEntry
         activeFolderId = updatedEntry.folderId
         return DocumentScene(docId: updatedEntry.fileURL.path, sceneJson: jsonObject, readOnly: false)
+    }
+    
+    public func clearCurrentEntry() {
+        currentEntry = nil
     }
 
     public func importScene(
@@ -236,6 +267,32 @@ public final class DocumentManager: ObservableObject {
             self.pendingDraft = nil
         }
         return pendingDraft
+    }
+
+    public func renameCurrentEntry(to newName: String) throws {
+        guard let entry = currentEntry else {
+            throw DocumentManagerError.noCurrentEntry
+        }
+        
+        let sanitizedName = newName.hasSuffix(".excalidraw") ? newName : "\(newName).excalidraw"
+        let directory = entry.fileURL.deletingLastPathComponent()
+        let newURL = directory.appendingPathComponent(sanitizedName)
+        
+        // Check if file already exists
+        if FileManager.default.fileExists(atPath: newURL.path) && newURL != entry.fileURL {
+            throw DocumentManagerError.fileAlreadyExists
+        }
+        
+        // Perform rename
+        try FileManager.default.moveItem(at: entry.fileURL, to: newURL)
+        
+        // Update index
+        store.updateEntryAfterRename(id: entry.id, newFileURL: newURL, newFileName: sanitizedName)
+        
+        // Update current entry
+        if let updated = store.indexedEntries.first(where: { $0.id == entry.id }) {
+            currentEntry = updated
+        }
     }
 
     private func resolveSaveURL(docId: String) throws -> URL {
@@ -629,6 +686,8 @@ public enum DocumentManagerError: LocalizedError {
     case unsupportedImportType
     case missingEmbeddedScene
     case invalidImportData
+    case noCurrentEntry
+    case fileAlreadyExists
 
     public var errorDescription: String? {
         switch self {
@@ -642,6 +701,10 @@ public enum DocumentManagerError: LocalizedError {
             return "No embedded scene data found in the file."
         case .invalidImportData:
             return "Unable to decode the imported scene."
+        case .noCurrentEntry:
+            return "No file is currently open."
+        case .fileAlreadyExists:
+            return "A file with that name already exists."
         }
     }
 }

@@ -2,29 +2,30 @@
 import PackageDescription
 
 let package = Package(
-    name: "ExcalidrawMac",
+    name: "XExcalidraw",
     platforms: [
         .macOS(.v13)
     ],
     products: [
-        .executable(name: "ExcalidrawMac", targets: ["ExcalidrawMac"])
+        .executable(name: "XExcalidraw", targets: ["XExcalidrawMac"])
     ],
     dependencies: [
         .package(path: "../shared")
     ],
     targets: [
         .executableTarget(
-            name: "ExcalidrawMac",
+            name: "XExcalidrawMac",
             dependencies: [
                 .product(name: "ExcalidrawShared", package: "shared")
             ],
+            path: "Sources/ExcalidrawMac",
             resources: [
                 .process("Resources")
             ]
         ),
         .testTarget(
             name: "ExcalidrawMacTests",
-            dependencies: ["ExcalidrawMac"]
+            dependencies: ["XExcalidrawMac"]
         )
     ]
 )

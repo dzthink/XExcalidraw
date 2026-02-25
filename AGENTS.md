@@ -13,8 +13,12 @@
 - `cd web/canvas-host && npm install && npm run dev`: Start local web host (Vite).
 - `cd web/canvas-host && npm run build`: Produce `web/canvas-host/dist`.
 - `./scripts/build_web.sh`: Build web host and copy bundle into native resources when paths are available.
+- `./scripts/build_native.sh ios-app`: Build iOS simulator app bundle.
+- `./scripts/build_native.sh ios-deploy`: Build iOS device app and install via ios-deploy.
+- `./scripts/build_native.sh macos-app`: Build macOS app bundle.
 - `./scripts/build_native.sh all`: Build iOS + macOS SwiftPM targets.
 - `./scripts/build_native.sh app`: Build runnable app bundles into `build/native`.
+- `./scripts/setup_free_signing.sh`: Configure free developer account signing.
 - `./scripts/test_all.sh`: Run Swift package tests and legacy Xcode UI tests (macOS + iOS simulator).
 
 ## Coding Style & Naming Conventions

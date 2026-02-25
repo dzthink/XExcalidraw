@@ -663,6 +663,8 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
             handleExport(payload: payload)
         } else if type == "requestAI" {
             handleRequestAI(payload: payload)
+        } else if type == "cursorChanged" {
+            handleCursorChanged(payload: payload)
         }
     }
 
@@ -790,6 +792,49 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
                 case .failure(let error):
                     self?.statusText = "AI error: \(error.localizedDescription)"
                 }
+            }
+        }
+    }
+
+    private func handleCursorChanged(payload: [String: Any]) {
+        guard let cursor = payload["cursor"] as? String else { return }
+        DispatchQueue.main.async {
+            Self.setSystemCursor(cursor)
+        }
+    }
+
+    private static func setSystemCursor(_ cursor: String) {
+        let cursorMap: [String: NSCursor] = [
+            "default": .arrow,
+            "auto": .arrow,
+            "pointer": .pointingHand,
+            "text": .iBeam,
+            "crosshair": .crosshair,
+            "move": .openHand,
+            "grab": .openHand,
+            "grabbing": .closedHand,
+            "ew-resize": .resizeLeftRight,
+            "ns-resize": .resizeUpDown,
+            "nesw-resize": .arrow, // Fallback
+            "nwse-resize": .arrow, // Fallback
+            "col-resize": .resizeLeftRight,
+            "row-resize": .resizeUpDown,
+            "not-allowed": .operationNotAllowed,
+            "wait": .arrow, // No wait cursor in NSCursor
+            "help": .arrow, // No help cursor in NSCursor
+            "zoom-in": .arrow, // No zoom-in cursor in NSCursor
+            "zoom-out": .arrow, // No zoom-out cursor in NSCursor
+            "none": .arrow // Use arrow as fallback for hidden cursor
+        ]
+
+        if let nsCursor = cursorMap[cursor] {
+            if nsCursor != NSCursor.current {
+                nsCursor.set()
+            }
+        } else {
+            // Default to arrow for unknown cursor types
+            if NSCursor.current != .arrow {
+                NSCursor.arrow.set()
             }
         }
     }
@@ -1104,9 +1149,43 @@ final class BundleSchemeHandler: NSObject, WKURLSchemeHandler {
 struct WebCanvasView: NSViewRepresentable {
     let webView: WKWebView
 
-    func makeNSView(context: Context) -> WKWebView {
-        webView
+    func makeNSView(context: Context) -> NSView {
+        // Wrap WKWebView in a custom NSView to ensure proper cursor handling
+        let container = WebViewContainer()
+        container.addWebView(webView)
+        return container
     }
 
-    func updateNSView(_ nsView: WKWebView, context: Context) {}
+    func updateNSView(_ nsView: NSView, context: Context) {
+        // Ensure the web view fills the container
+        if let container = nsView as? WebViewContainer {
+            container.layoutWebView()
+        }
+    }
+}
+
+/// A container view that properly handles WKWebView's cursor updates in SwiftUI
+final class WebViewContainer: NSView {
+    private weak var webView: WKWebView?
+
+    func addWebView(_ webView: WKWebView) {
+        self.webView = webView
+        // Use autoresizingMask for layout
+        webView.translatesAutoresizingMaskIntoConstraints = true
+        // Enable magnification - this can help with cursor updates
+        webView.allowsMagnification = true
+        addSubview(webView)
+        layoutWebView()
+    }
+
+    func layoutWebView() {
+        guard let webView = webView else { return }
+        webView.frame = bounds
+        webView.autoresizingMask = [.width, .height]
+    }
+
+    override func resize(withOldSuperviewSize oldSize: NSSize) {
+        super.resize(withOldSuperviewSize: oldSize)
+        layoutWebView()
+    }
 }

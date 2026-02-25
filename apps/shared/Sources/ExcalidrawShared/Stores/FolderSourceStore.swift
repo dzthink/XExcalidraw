@@ -7,9 +7,26 @@ import Darwin
 public final class FolderSourceStore: ObservableObject {
     @Published public private(set) var sources: [FolderSource] = []
     @Published public private(set) var indexedEntries: [ExcalidrawFileEntry] = []
+    @Published public var activeSourceId: UUID? {
+        didSet {
+            persistActiveSourceId()
+        }
+    }
+    
+    public var activeSource: FolderSource? {
+        guard let activeSourceId else { return nil }
+        return sources.first { $0.id == activeSourceId }
+    }
+    
+    public var activeSourceEntries: [ExcalidrawFileEntry] {
+        guard let activeSourceId else { return [] }
+        return indexedEntries.filter { $0.folderId == activeSourceId }
+    }
 
     private let userDefaults: UserDefaults
     private let storageKey = "folderSources"
+    private let activeSourceKey = "activeFolderSourceId"
+    private let sourceHistoryKey = "folderSourceHistory"
     private var activeURLs: [UUID: URL] = [:]
     private let indexStore: ExcalidrawFileIndexStore
     private let indexingQueue: DispatchQueue
@@ -31,6 +48,7 @@ public final class FolderSourceStore: ObservableObject {
         self.indexStore = indexStore
         self.indexingQueue = DispatchQueue(label: "com.xexcalidraw.folder-index", qos: .background)
         loadFromDefaults()
+        loadActiveSourceId()
         loadIndexFromStore()
         restoreSecurityScopedAccess()
         refreshAllIndexes()
@@ -46,7 +64,8 @@ public final class FolderSourceStore: ObservableObject {
         for existingSource in sources {
             if let existingURL = resolveURL(for: existingSource),
                existingURL.standardizedFileURL.path == standardizedPath {
-                // 目录已存在，直接返回不做任何操作
+                // 目录已存在，设为活跃并返回
+                activeSourceId = existingSource.id
                 return
             }
         }
@@ -58,6 +77,42 @@ public final class FolderSourceStore: ObservableObject {
         persistSources()
         startAccessing(source: source)
         refreshIndex(for: source)
+        // 设置为当前活跃存储库
+        activeSourceId = source.id
+        addToHistory(sourceId: source.id)
+    }
+    
+    public func switchToSource(id: UUID) {
+        guard sources.contains(where: { $0.id == id }) else { return }
+        activeSourceId = id
+        addToHistory(sourceId: id)
+    }
+    
+    public func getSourceHistory() -> [FolderSource] {
+        guard let historyData = userDefaults.data(forKey: sourceHistoryKey),
+              let historyIds = try? JSONDecoder().decode([UUID].self, from: historyData) else {
+            return []
+        }
+        // 按历史顺序返回存在的存储库
+        return historyIds.compactMap { id in
+            sources.first { $0.id == id }
+        }
+    }
+    
+    private func addToHistory(sourceId: UUID) {
+        var history = getSourceHistory().map { $0.id }
+        // 移除已存在的相同ID
+        history.removeAll { $0 == sourceId }
+        // 添加到开头
+        history.insert(sourceId, at: 0)
+        // 只保留最近10个
+        if history.count > 10 {
+            history = Array(history.prefix(10))
+        }
+        // 保存
+        if let data = try? JSONEncoder().encode(history) {
+            userDefaults.set(data, forKey: sourceHistoryKey)
+        }
     }
 
     @discardableResult
@@ -81,6 +136,11 @@ public final class FolderSourceStore: ObservableObject {
         indexedEntries.removeAll { $0.folderId == id }
         persistSources()
         persistIndexEntries()
+        
+        // 如果删除的是当前活跃存储库，切换到其他存储库
+        if activeSourceId == id {
+            activeSourceId = sources.first?.id
+        }
     }
 
     public func resolveURL(for source: FolderSource) -> URL? {
@@ -124,6 +184,24 @@ public final class FolderSourceStore: ObservableObject {
         } catch {
             sources = []
         }
+    }
+    
+    private func loadActiveSourceId() {
+        var loadedId: UUID? = nil
+        if let data = userDefaults.data(forKey: activeSourceKey),
+           let decodedId = try? JSONDecoder().decode(UUID?.self, from: data) {
+            loadedId = decodedId
+        }
+        activeSourceId = loadedId
+        // 确保activeSourceId在sources中存在
+        if let activeId = loadedId, !sources.contains(where: { $0.id == activeId }) {
+            activeSourceId = sources.first?.id
+        }
+    }
+    
+    private func persistActiveSourceId() {
+        guard let data = try? JSONEncoder().encode(activeSourceId) else { return }
+        userDefaults.set(data, forKey: activeSourceKey)
     }
 
     private func loadIndexFromStore() {

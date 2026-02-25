@@ -38,7 +38,7 @@ fi
 if [[ -n "$RESOURCES_DIR" ]]; then
   echo "Copying web bundle to $RESOURCES_DIR"
   mkdir -p "$RESOURCES_DIR"
-  rsync -a --delete "$DIST_DIR/" "$RESOURCES_DIR/"
+  rsync -a "$DIST_DIR/" "$RESOURCES_DIR/"
 else
   echo "Skipping bundle copy; missing build output paths."
 fi

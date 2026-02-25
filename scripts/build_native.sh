@@ -1,6 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# =============================================================================
+# DEVICE BUILD CONFIGURATION
+# Edit these values for your development environment
+# Or keep them empty and use environment variables to override
+# =============================================================================
+
+# Your Apple Development signing identity
+# Find it with: security find-identity -v -p codesigning
+# Example: "Apple Development: Your Name (XXXXXXXXXX)"
+DEFAULT_IOS_SIGN_IDENTITY="Apple Development: dzthink@qq.com (65Y79GZJKH)"
+
+# Path to your provisioning profile (.mobileprovision file)
+# Download from: https://developer.apple.com/account/resources/profiles/list
+# For free provisioning with Xcode, leave this empty (Xcode manages it)
+DEFAULT_IOS_PROVISIONING_PROFILE=""
+
+# For free developer account builds, use Xcode directly:
+#   open apps/_legacy_xcode/ExcalidrawIOS.xcodeproj
+# Then select your iPhone and click Run (Cmd+R)
+
+# =============================================================================
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IOS_PACKAGE="$ROOT_DIR/apps/ios"
 MAC_PACKAGE="$ROOT_DIR/apps/macos"
@@ -17,14 +39,18 @@ CLANG_MODULE_CACHE="$SWIFTPM_ROOT/clang-module-cache"
 CONFIGURATION_RAW="${CONFIGURATION:-Debug}"
 CONFIGURATION="$(echo "$CONFIGURATION_RAW" | tr '[:upper:]' '[:lower:]')"
 
-IOS_SDK="${IOS_SDK:-iphonesimulator}"
+IOS_DEVICE_BUILD="${IOS_DEVICE_BUILD:-0}"
+IOS_SDK="${IOS_SDK:-}"  # Auto-detect if empty
 IOS_VERSION="${IOS_VERSION:-16.0}"
-IOS_ARCH="${IOS_ARCH:-$(uname -m | sed 's/x86_64/x86_64/;s/arm64/arm64/')}"
-IOS_TRIPLE="${IOS_TRIPLE:-$IOS_ARCH-apple-ios${IOS_VERSION}-simulator}"
+IOS_ARCH="${IOS_ARCH:-arm64}"
+# Use default values from configuration section if env var not set
+IOS_SIGN_IDENTITY="${IOS_SIGN_IDENTITY:-$DEFAULT_IOS_SIGN_IDENTITY}"
+IOS_PROVISIONING_PROFILE="${IOS_PROVISIONING_PROFILE:-$DEFAULT_IOS_PROVISIONING_PROFILE}"
+IOS_TRIPLE="${IOS_TRIPLE:-}"  # Auto-detect if empty
 
 OUTPUT_DIR="${OUTPUT_DIR:-$ROOT_DIR/build/native}"
-IOS_TARGET="ExcalidrawIOS"
-MAC_TARGET="ExcalidrawMac"
+IOS_TARGET="XExcalidraw"
+MAC_TARGET="XExcalidraw"
 IOS_BUNDLE_ID="${IOS_BUNDLE_ID:-com.xexcalidraw.ios}"
 MAC_BUNDLE_ID="${MAC_BUNDLE_ID:-com.xexcalidraw.macos}"
 MARKETING_VERSION="${MARKETING_VERSION:-1.0}"
@@ -41,7 +67,22 @@ SWIFTPM_COMMON=(
 
 usage() {
   cat <<USAGE
-Usage: $(basename "$0") [ios|macos|all|ios-app|macos-app|app]
+Usage: $(basename "$0") [ios|macos|all|ios-app|macos-app|app|ios-device|ios-deploy]
+
+Commands:
+  ios              Build iOS library (simulator)
+  macos            Build macOS library
+  all              Build both iOS and macOS libraries
+  ios-app          Build iOS app bundle (simulator)
+  macos-app        Build macOS app bundle
+  app              Build both iOS and macOS app bundles
+  ios-device       Build iOS app for physical device (requires signing config)
+  ios-deploy       Build and deploy iOS app to connected device via ios-deploy
+
+Device Build Setup:
+  1. Edit DEFAULT_IOS_SIGN_IDENTITY in this script
+  2. Edit DEFAULT_IOS_PROVISIONING_PROFILE in this script
+  3. Or use environment variables: IOS_SIGN_IDENTITY, IOS_PROVISIONING_PROFILE
 
 Env vars:
   CONFIGURATION   Build config (Debug/Release). Default: Debug
@@ -55,10 +96,17 @@ Env vars:
   MAC_BUNDLE_ID    macOS bundle identifier. Default: com.xexcalidraw.macos
   MARKETING_VERSION  CFBundleShortVersionString. Default: 1.0
   BUILD_NUMBER       CFBundleVersion. Default: 1
+  IOS_DEVICE_BUILD Build for physical device (1/0). Default: 0
   IOS_INSTALL      Install to booted simulator (1/0). Default: 0
   IOS_DEVICE       Simulator UDID or 'booted'. Default: booted
+  IOS_SIGN_IDENTITY  Code signing identity for device builds (required for device)
+  IOS_PROVISIONING_PROFILE  Path to provisioning profile (required for device)
+  IOS_DEPLOY       Install to physical device via ios-deploy (1/0). Default: 0
+  IOS_DEPLOY_ARGS  Additional arguments for ios-deploy
 
 Examples:
+  # Build for device and install via ios-deploy
+  IOS_DEVICE_BUILD=1 IOS_SIGN_IDENTITY="Apple Development" IOS_DEPLOY=1 ./scripts/build_native.sh ios-app
   $0 all
   CONFIGURATION=Release $0 macos
   IOS_VERSION=17.0 $0 ios
@@ -106,12 +154,33 @@ ensure_packages() {
 }
 
 ios_sdk_path() {
-  xcrun --sdk "$IOS_SDK" --show-sdk-path
+  local sdk="$1"
+  xcrun --sdk "$sdk" --show-sdk-path
+}
+
+resolve_ios_settings() {
+  # Auto-detect SDK and triple based on device build setting
+  if [[ -z "$IOS_SDK" ]]; then
+    if [[ "$IOS_DEVICE_BUILD" == "1" ]]; then
+      IOS_SDK="iphoneos"
+    else
+      IOS_SDK="iphonesimulator"
+    fi
+  fi
+  
+  if [[ -z "$IOS_TRIPLE" ]]; then
+    if [[ "$IOS_DEVICE_BUILD" == "1" ]]; then
+      IOS_TRIPLE="$IOS_ARCH-apple-ios$IOS_VERSION"
+    else
+      IOS_TRIPLE="$IOS_ARCH-apple-ios$IOS_VERSION-simulator"
+    fi
+  fi
 }
 
 swiftpm_bin_path_ios() {
+  resolve_ios_settings
   local sdk_path
-  sdk_path="$(ios_sdk_path)"
+  sdk_path="$(ios_sdk_path "$IOS_SDK")"
   swift build \
     --package-path "$IOS_PACKAGE" \
     --configuration "$CONFIGURATION" \
@@ -133,9 +202,13 @@ swiftpm_bin_path_macos() {
 
 build_ios() {
   echo "==> Building iOS ($CONFIGURATION)"
+  resolve_ios_settings
   prepare_swiftpm_paths
+  
+  echo "    SDK: $IOS_SDK, Triple: $IOS_TRIPLE"
+  
   local sdk_path
-  sdk_path="$(ios_sdk_path)"
+  sdk_path="$(ios_sdk_path "$IOS_SDK")"
   if [[ -z "$sdk_path" ]]; then
     echo "Failed to resolve SDK path for $IOS_SDK" >&2
     exit 1
@@ -169,7 +242,7 @@ write_ios_info_plist() {
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleDisplayName</key>
-  <string>Excalidraw</string>
+  <string>XExcalidraw</string>
   <key>CFBundleExecutable</key>
   <string>$IOS_TARGET</string>
   <key>CFBundleIdentifier</key>
@@ -248,7 +321,7 @@ write_macos_info_plist() {
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleDisplayName</key>
-  <string>Excalidraw</string>
+  <string>XExcalidraw</string>
   <key>CFBundleExecutable</key>
   <string>$MAC_TARGET</string>
   <key>CFBundleIdentifier</key>
@@ -370,7 +443,69 @@ copy_web_dist() {
   fi
 }
 
+check_ios_deploy() {
+  if ! command -v ios-deploy &> /dev/null; then
+    echo "Error: ios-deploy is not installed." >&2
+    echo "Install with: npm install -g ios-deploy" >&2
+    echo "Or: brew install ios-deploy" >&2
+    exit 1
+  fi
+}
+
+build_ios_xcode() {
+  local project_path="$ROOT_DIR/apps/_legacy_xcode/ExcalidrawIOS.xcodeproj"
+  local scheme="ExcalidrawIOS"
+  local config="$CONFIGURATION_RAW"
+  local sdk="$IOS_SDK"
+  
+  if [[ -z "$sdk" ]]; then
+    [[ "$IOS_DEVICE_BUILD" == "1" ]] && sdk="iphoneos" || sdk="iphonesimulator"
+  fi
+  
+  echo "==> Building iOS with xcodebuild ($config, $sdk)"
+  echo "    Using Xcode project: $project_path"
+  
+  # Build for device - Xcode will handle signing with configured team
+  xcodebuild \
+    -project "$project_path" \
+    -scheme "$scheme" \
+    -configuration "$config" \
+    -sdk "$sdk" \
+    -derivedDataPath "$OUTPUT_DIR/ios_derived" \
+    build
+}
+
 bundle_ios_app() {
+  local use_xcodebuild="${USE_XCODEBUILD:-1}"
+  
+  # For device builds, use xcodebuild by default (required for free developer accounts)
+  if [[ "$IOS_DEVICE_BUILD" == "1" && "$use_xcodebuild" == "1" ]]; then
+    build_ios_xcode
+    
+    # Find the built app
+    local app_path=$(find "$OUTPUT_DIR/ios_derived" -name "*.app" -type d | head -1)
+    if [[ -z "$app_path" ]]; then
+      echo "Error: Could not find built .app bundle" >&2
+      exit 1
+    fi
+    
+    local app_dir="$OUTPUT_DIR/ios/$IOS_TARGET.app"
+    rm -rf "$app_dir"
+    mkdir -p "$OUTPUT_DIR/ios"
+    cp -R "$app_path" "$app_dir"
+    echo "iOS app bundle: $app_dir"
+    
+    # Deploy to physical device via ios-deploy
+    if [[ "${IOS_DEPLOY:-0}" == "1" ]]; then
+      check_ios_deploy
+      echo "==> Installing to device via ios-deploy"
+      ios-deploy --bundle "$app_dir" ${IOS_DEPLOY_ARGS:-} --justlaunch
+      return
+    fi
+    return
+  fi
+  
+  # Simulator build - use SwiftPM (original method)
   build_ios
   ensure_web_dist
   local bin_path
@@ -386,10 +521,16 @@ bundle_ios_app() {
   # Compile Assets.xcassets if exists
   local xcassets_path="$IOS_PACKAGE/Sources/ExcalidrawIOS/Resources/Assets.xcassets"
   if [[ -d "$xcassets_path" ]]; then
-    compile_assets "$xcassets_path" "$app_dir" "iphonesimulator" "$IOS_VERSION"
+    local platform="iphonesimulator"
+    [[ "$IOS_DEVICE_BUILD" == "1" ]] && platform="iphoneos"
+    compile_assets "$xcassets_path" "$app_dir" "$platform" "$IOS_VERSION"
   fi
   
   copy_web_dist "$app_dir"
+  
+  # Ad-hoc code sign for simulator
+  codesign --force --sign - --timestamp=none "$app_dir/$IOS_TARGET" 2>/dev/null || true
+  
   echo "iOS app bundle: $app_dir"
 
   if [[ "${IOS_INSTALL:-0}" == "1" ]]; then
@@ -422,6 +563,10 @@ bundle_macos_app() {
   fi
   
   copy_web_dist "$resources_dir"
+  
+  # Ad-hoc code sign the executable
+  codesign --force --sign - --timestamp=none "$macos_dir/$MAC_TARGET" 2>/dev/null || true
+  
   echo "macOS app bundle: $app_dir"
 }
 
@@ -448,6 +593,15 @@ case "$TARGET" in
   app)
     bundle_ios_app
     bundle_macos_app
+    ;;
+  ios-device)
+    IOS_DEVICE_BUILD=1
+    bundle_ios_app
+    ;;
+  ios-deploy)
+    IOS_DEVICE_BUILD=1
+    IOS_DEPLOY=1
+    bundle_ios_app
     ;;
   *)
     usage

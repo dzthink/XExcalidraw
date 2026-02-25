@@ -2,13 +2,13 @@
 import PackageDescription
 
 let package = Package(
-    name: "ExcalidrawIOS",
+    name: "XExcalidraw",
     platforms: [
         .iOS(.v17),
         .macOS(.v13)
     ],
     products: [
-        .executable(name: "ExcalidrawIOS", targets: ["ExcalidrawIOS"])
+        .executable(name: "XExcalidraw", targets: ["ExcalidrawIOS"])
     ],
     dependencies: [
         .package(path: "../shared")
@@ -19,6 +19,7 @@ let package = Package(
             dependencies: [
                 .product(name: "ExcalidrawShared", package: "shared")
             ],
+            path: "Sources/ExcalidrawIOS",
             resources: [
                 .process("Resources")
             ]

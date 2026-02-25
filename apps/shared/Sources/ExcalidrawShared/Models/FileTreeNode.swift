@@ -9,8 +9,21 @@ public class FileTreeNode: Identifiable, ObservableObject {
     public let sourceId: UUID?  // 根目录对应的 FolderSource id
     @Published public var isExpanded: Bool
     @Published public var children: [FileTreeNode]
+    public weak var parent: FileTreeNode?
     
-    public init(name: String, path: String, isFolder: Bool, fileEntry: ExcalidrawFileEntry? = nil, sourceId: UUID? = nil, isExpanded: Bool = false, children: [FileTreeNode] = []) {
+    public var isRoot: Bool {
+        parent == nil
+    }
+    
+    public var root: FileTreeNode {
+        var current: FileTreeNode = self
+        while let p = current.parent {
+            current = p
+        }
+        return current
+    }
+    
+    public init(name: String, path: String, isFolder: Bool, fileEntry: ExcalidrawFileEntry? = nil, sourceId: UUID? = nil, isExpanded: Bool = false, children: [FileTreeNode] = [], parent: FileTreeNode? = nil) {
         self.name = name
         self.path = path
         self.isFolder = isFolder
@@ -18,6 +31,7 @@ public class FileTreeNode: Identifiable, ObservableObject {
         self.sourceId = sourceId
         self.isExpanded = isExpanded
         self.children = children
+        self.parent = parent
     }
 }
 
@@ -60,17 +74,19 @@ public class FileTreeBuilder {
                 currentPath = currentPath.isEmpty ? component : "\(currentPath)/\(component)"
                 
                 if folderMap[currentPath] == nil {
+                    let parentNode = folderMap[parentPath]
                     let newFolder = FileTreeNode(
                         name: component,
                         path: currentPath,
                         isFolder: true,
                         sourceId: sourceId,
-                        isExpanded: false
+                        isExpanded: false,
+                        parent: parentNode
                     )
                     folderMap[currentPath] = newFolder
                     
                     // Add to parent
-                    if let parent = folderMap[parentPath] {
+                    if let parent = parentNode {
                         parent.children.append(newFolder)
                     }
                 }
@@ -87,7 +103,8 @@ public class FileTreeBuilder {
                         isFolder: false,
                         fileEntry: file,
                         sourceId: sourceId,
-                        isExpanded: false
+                        isExpanded: false,
+                        parent: folder
                     )
                     folder.children.append(fileNode)
                 }
