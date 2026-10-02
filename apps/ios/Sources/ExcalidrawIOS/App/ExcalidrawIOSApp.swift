@@ -102,7 +102,7 @@ private final class CanvasSession: ObservableObject {
             let defaults = UserDefaults(suiteName: "siye.uitests." + UUID().uuidString)!
             let store = FolderSourceStore(userDefaults: defaults, indexStore: ExcalidrawJSONFileIndexStore(fileURL: root.appendingPathComponent("index.json")))
             manager = DocumentManager(store: store)
-            if fixture == "documents" {
+            if fixture == "documents" || fixture == "browser" {
                 do {
                     let folder = root.appendingPathComponent("Test Documents")
                     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -110,6 +110,12 @@ private final class CanvasSession: ObservableObject {
                     for (name, type) in [("Test Canvas", SiyeDocumentType.excalidraw), ("Test Mind Map", SiyeDocumentType.mindmap)] {
                         let data = try JSONSerialization.data(withJSONObject: type.blankScene)
                         try data.write(to: folder.appendingPathComponent(name + type.fileExtension), options: .atomic)
+                    }
+                    if fixture == "browser" {
+                        let nested = folder.appendingPathComponent("Projects/Nested", isDirectory: true)
+                        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+                        let data = try JSONSerialization.data(withJSONObject: SiyeDocumentType.mindmap.blankScene)
+                        try data.write(to: nested.appendingPathComponent("Nested Idea.mindmap"), options: .atomic)
                     }
                     try manager.addFolder(url: folder)
                 } catch {
@@ -308,6 +314,7 @@ struct FolderListView: View {
     @State private var newFolderName = ""
     @State private var expandedFolders: Set<UUID> = []
     @State private var isFoldersSectionExpanded = true  // 控制文件夹区域整体展开/折叠
+    @State private var searchText = ""
     
     private var totalFileCount: Int {
         documentManager.activeSourceEntries.count
@@ -329,7 +336,9 @@ struct FolderListView: View {
     }
     
     private var groupedRootFiles: [(String, [ExcalidrawFileEntry])] {
-        groupEntriesByYear(rootFiles)
+        let entries = searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? rootFiles : documentManager.activeSourceEntries
+        return groupEntriesByYear(entries.filter { matchesBrowserSearch($0.relativePath, query: searchText) })
     }
     
     // MARK: - Body Components
@@ -355,7 +364,7 @@ struct FolderListView: View {
     }
     
     private var foldersList: some View {
-        ForEach(topLevelFolders) { folderNode in
+        ForEach(visibleFolders) { folderNode in
             FolderTreeRow(
                 folderNode: folderNode,
                 level: 0,
@@ -369,7 +378,7 @@ struct FolderListView: View {
                 }
             )
             
-            if expandedFolders.contains(folderNode.id) {
+            if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, expandedFolders.contains(folderNode.id) {
                 subFoldersList(for: folderNode)
             }
         }
@@ -395,9 +404,17 @@ struct FolderListView: View {
     
     private var foldersSection: some View {
         Section {
+            Button {
+                navigationPath.append(FolderDestination(folderPath: nil, folderName: "全部"))
+            } label: {
+                FolderRowPlain(name: "全部", count: totalFileCount)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("all-documents")
+
             foldersSectionHeader
-            
-            if isFoldersSectionExpanded {
+
+            if isFoldersSectionExpanded || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 foldersList
             }
         }
@@ -407,6 +424,16 @@ struct FolderListView: View {
         fileTreeRoot?.children.filter { $0.isFolder } ?? []
     }
     
+    private var visibleFolders: [FileTreeNode] {
+        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return topLevelFolders }
+        func matchingFolders(in node: FileTreeNode) -> [FileTreeNode] {
+            node.children.filter { $0.isFolder }.flatMap { child in
+                (matchesBrowserSearch(child.path, query: searchText) ? [child] : []) + matchingFolders(in: child)
+            }
+        }
+        return fileTreeRoot.map { matchingFolders(in: $0) } ?? []
+    }
+
     private var filesSections: some View {
         ForEach(groupedRootFiles, id: \.0) { year, yearEntries in
             Section {
@@ -473,15 +500,24 @@ struct FolderListView: View {
     
     var body: some View {
         List {
-            if fileTreeRoot != nil {
-                foldersSection
-            }
-            
-            if !rootFiles.isEmpty {
+            foldersSection
+
+            if !groupedRootFiles.isEmpty {
                 filesSections
             }
         }
         .listStyle(.insetGrouped)
+        .scrollDismissesKeyboard(.interactively)
+        .safeAreaInset(edge: .bottom) {
+            BrowserBottomBar(
+                documentManager: documentManager,
+                viewModel: viewModel,
+                selectedEntryId: $selectedEntryId,
+                navigationPath: $navigationPath,
+                searchText: $searchText,
+                folderPath: nil
+            )
+        }
         .alert("新建文件夹", isPresented: $isShowingNewFolderAlert) {
             TextField("文件夹名称", text: $newFolderName)
             Button("取消", role: .cancel) {
@@ -504,6 +540,11 @@ struct FolderListView: View {
             rescanFolders()
         }
         .onChange(of: documentManager.indexedEntries) { _, _ in
+            rescanFolders()
+        }
+        .onChange(of: documentManager.activeFolderId) { _, _ in
+            searchText = ""
+            expandedFolders = []
             rescanFolders()
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("RefreshFileTree"))) { _ in
@@ -974,8 +1015,8 @@ struct EditorDestination: Hashable {
 }
 
 struct FolderDestination: Hashable {
-    // 使用文件夹路径作为唯一标识
-    let folderPath: String
+    // nil opens all documents in the active source.
+    let folderPath: String?
     let folderName: String
     
     // Hashable 实现
@@ -985,6 +1026,105 @@ struct FolderDestination: Hashable {
     
     static func == (lhs: FolderDestination, rhs: FolderDestination) -> Bool {
         lhs.folderPath == rhs.folderPath
+    }
+}
+
+// MARK: - Browser Search and Creation
+
+private func matchesBrowserSearch(_ text: String, query: String) -> Bool {
+    let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    return query.isEmpty || text.localizedStandardContains(query)
+}
+
+struct BrowserBottomBar: View {
+    @ObservedObject var documentManager: DocumentManager
+    @ObservedObject var viewModel: WebCanvasViewModel
+    @Binding var selectedEntryId: UUID?
+    @Binding var navigationPath: NavigationPath
+    @Binding var searchText: String
+    let folderPath: String?
+    @FocusState private var isSearchFocused: Bool
+    @State private var isCreating = false
+    @State private var creationError: String?
+
+    var body: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("搜索", text: $searchText)
+                    .focused($isSearchFocused)
+                    .submitLabel(.search)
+                    .onSubmit { isSearchFocused = false }
+                    .accessibilityIdentifier("browser-search")
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityLabel("清除搜索")
+                }
+            }
+            .padding(.horizontal, 16)
+            .frame(minHeight: 52)
+            .background(.regularMaterial, in: Capsule())
+            .overlay(Capsule().stroke(.quaternary, lineWidth: 0.5))
+
+            Menu {
+                Button("新建画布", systemImage: "scribble.variable") {
+                    createDocument(type: .excalidraw)
+                }
+                Button("新建思维导图", systemImage: "point.3.connected.trianglepath.dotted") {
+                    createDocument(type: .mindmap)
+                }
+            } label: {
+                Group {
+                    if isCreating { ProgressView() }
+                    else { Image(systemName: "square.and.pencil").font(.title2) }
+                }
+                .foregroundStyle(.primary)
+                .frame(width: 52, height: 52)
+                .background(.regularMaterial, in: Circle())
+                .overlay(Circle().stroke(.quaternary, lineWidth: 0.5))
+            }
+            .disabled(isCreating)
+            .accessibilityLabel("新建文档")
+            .accessibilityIdentifier("browser-create")
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .alert("新建失败", isPresented: Binding(
+            get: { creationError != nil },
+            set: { if !$0 { creationError = nil } }
+        )) {
+            Button("确定", role: .cancel) { creationError = nil }
+        } message: {
+            Text(creationError ?? "")
+        }
+    }
+
+    private func createDocument(type: SiyeDocumentType) {
+        guard !isCreating else { return }
+        isSearchFocused = false
+        isCreating = true
+        documentManager.createBlankDocument(
+            in: documentManager.activeSource?.id,
+            relativeFolderPath: folderPath ?? "",
+            type: type
+        ) { result in
+            isCreating = false
+            switch result {
+            case .success(let scene):
+                guard let entry = documentManager.currentEntry else { return }
+                viewModel.loadScene(scene)
+                selectedEntryId = entry.id
+                navigationPath.append(EditorDestination(entryId: entry.id))
+            case .failure(let error):
+                creationError = error.localizedDescription
+            }
+        }
     }
 }
 
@@ -1002,51 +1142,17 @@ struct FileListView: View {
     @State private var newFolderName = ""
     @State private var currentFolderNode: FileTreeNode?
     
-    // 仅当前目录下的文件（不包含子目录）
+    @State private var searchText = ""
+
     private var currentFolderFiles: [ExcalidrawFileEntry] {
-        _ = refreshTrigger // 依赖刷新触发器
-        guard let source = documentManager.activeSource,
-              let rootURL = documentManager.folderStore.resolveURL(for: source) else { return [] }
-        
-        let targetPath = folderPath ?? ""
-        
+        _ = refreshTrigger
         return documentManager.activeSourceEntries.filter { entry in
-            // 计算相对路径
-            let entryPath = entry.fileURL.path
-            let rootPath = rootURL.path
-            
-            let relativePath: String
-            if entryPath.hasPrefix(rootPath) {
-                let index = entryPath.index(entryPath.startIndex, offsetBy: rootPath.count)
-                var path = String(entryPath[index...])
-                // 移除开头的 /
-                if path.hasPrefix("/") {
-                    path.removeFirst()
-                }
-                relativePath = path
-            } else {
-                relativePath = entryPath
-            }
-            
-            if targetPath.isEmpty {
-                // 全部文件视图 - 显示所有文件
-                return true
-            } else {
-                // 特定文件夹 - 只显示该目录下的文件
-                // 文件路径应该是 "targetPath/filename.excalidraw" 格式
-                // 不应该包含额外的子目录
-                let components = relativePath.split(separator: "/")
-                if components.count == 2 {
-                    // 只有一层目录，检查是否匹配目标路径
-                    return String(components[0]) == targetPath
-                }
-                return false
-            }
-        }.sorted {
-            ($0.lastOpenedAt ?? $0.modifiedAt) > ($1.lastOpenedAt ?? $1.modifiedAt)
+            let parentPath = (entry.relativePath as NSString).deletingLastPathComponent
+            let isInFolder = folderPath == nil || parentPath == folderPath
+            return isInFolder && matchesBrowserSearch(entry.relativePath, query: searchText)
         }
     }
-    
+
     private var groupedEntries: [(String, [ExcalidrawFileEntry])] {
         groupEntriesByYear(currentFolderFiles)
     }
@@ -1054,7 +1160,7 @@ struct FileListView: View {
     private var subFolders: [FileTreeNode] {
         _ = refreshTrigger // 依赖刷新触发器
         if let folderNode = currentFolderNode {
-            return folderNode.children.filter { $0.isFolder }
+            return folderNode.children.filter { $0.isFolder && matchesBrowserSearch($0.name, query: searchText) }
         }
         return []
     }
@@ -1149,33 +1255,26 @@ struct FileListView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .scrollDismissesKeyboard(.interactively)
+        .safeAreaInset(edge: .bottom) {
+            BrowserBottomBar(
+                documentManager: documentManager,
+                viewModel: viewModel,
+                selectedEntryId: $selectedEntryId,
+                navigationPath: $navigationPath,
+                searchText: $searchText,
+                folderPath: folderPath
+            )
+        }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
-            // 只在特定文件夹视图显示新建按钮，全部文件列表不显示
             ToolbarItem(placement: .topBarTrailing) {
                 if currentFolderNode != nil {
-                    HStack(spacing: 16) {
-                        // 新建文件
-                        Menu {
-                            Button("新建画布", systemImage: "scribble.variable") {
-                                createNewFile(type: .excalidraw)
-                            }
-                            Button("新建思维导图", systemImage: "point.3.connected.trianglepath.dotted") {
-                                createNewFile(type: .mindmap)
-                            }
-                        } label: {
-                            Image(systemName: "doc.badge.plus")
-                                .font(.title3)
-                        }
-                        
-                        // 新建文件夹
-                        Button {
-                            createNewFolderInCurrentDirectory()
-                        } label: {
-                            Image(systemName: "folder.badge.plus")
-                                .font(.title3)
-                        }
+                    Button {
+                        createNewFolderInCurrentDirectory()
+                    } label: {
+                        Label("新建文件夹", systemImage: "folder.badge.plus")
                     }
                     .foregroundStyle(.primary)
                 }
@@ -1343,60 +1442,6 @@ struct FileListView: View {
         } else {
             return 1
         }
-    }
-    
-    private func createNewFile(type: SiyeDocumentType) {
-        // 如果在特定文件夹内，传递文件夹路径
-        if let folderNode = currentFolderNode {
-            createNewFileInFolder(folderNode, type: type)
-        } else {
-            viewModel.createNewDocument(type: type)
-        }
-    }
-    
-    private func createNewFileInFolder(_ folderNode: FileTreeNode, type: SiyeDocumentType) {
-        guard let source = documentManager.activeSource,
-              let rootURL = documentManager.folderStore.resolveURL(for: source) else { return }
-        
-        let folderURL = resolveFolderURL(for: folderNode, rootURL: rootURL)
-        let fileURL = makeUniqueFileURL(in: folderURL, type: type)
-        
-        let sceneJson = type.blankScene
-        do {
-            let jsonData = try JSONSerialization.data(withJSONObject: sceneJson, options: [.prettyPrinted])
-            try jsonData.write(to: fileURL, options: [.atomic])
-            
-            // 添加到索引并打开
-            if let entry = documentManager.folderStore.upsertEntry(
-                for: fileURL,
-                folderId: source.id,
-                rootURL: rootURL,
-                lastOpenedAt: Date()
-            ) {
-                let scene = try documentManager.open(entry: entry)
-                viewModel.loadScene(scene)
-                selectedEntryId = entry.id
-                // 触发刷新以更新文件列表
-                refreshTrigger = UUID()
-                // 导航到编辑器
-                navigationPath.append(EditorDestination(entryId: entry.id))
-            }
-        } catch {}
-    }
-    
-    private func makeUniqueFileURL(in folderURL: URL, type: SiyeDocumentType) -> URL {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd-HHmmss"
-        let timestamp = formatter.string(from: Date())
-        let baseName = "Untitled-\(timestamp)"
-        var counter = 0
-        var fileURL = folderURL.appendingPathComponent("\(baseName)\(type.fileExtension)")
-        
-        while FileManager.default.fileExists(atPath: fileURL.path) {
-            counter += 1
-            fileURL = folderURL.appendingPathComponent("\(baseName)-\(counter)\(type.fileExtension)")
-        }
-        return fileURL
     }
     
     private func createNewFolderInCurrentDirectory() {

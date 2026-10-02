@@ -222,6 +222,7 @@ public final class DocumentManager: ObservableObject {
 
     public func createBlankDocument(
         in folderId: UUID? = nil,
+        relativeFolderPath: String = "",
         type: SiyeDocumentType = .excalidraw,
         completion: @escaping (Result<DocumentScene, Error>) -> Void
     ) {
@@ -247,7 +248,10 @@ public final class DocumentManager: ObservableObject {
                 return
             }
             
-            let fileURL = self.makeUntitledFileURL(in: targetFolderURL, type: type)
+            let destinationURL = relativeFolderPath.isEmpty
+                ? targetFolderURL
+                : targetFolderURL.appendingPathComponent(relativeFolderPath, isDirectory: true)
+            let fileURL = self.makeUntitledFileURL(in: destinationURL, type: type)
             let sceneJson = type.blankScene
             do {
                 let jsonData = try JSONSerialization.data(withJSONObject: sceneJson, options: [.prettyPrinted])

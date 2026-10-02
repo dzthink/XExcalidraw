@@ -294,6 +294,82 @@ final class ExcalidrawIOSUITests: XCTestCase {
         }
     }
 
+    func testAllDocumentsAndBottomSearch() {
+        let app = makeApplication()
+        app.launchEnvironment["SIYE_UI_TEST_FIXTURE"] = "browser"
+        app.launch()
+        let all = app.buttons["all-documents"]
+        let search = app.textFields["browser-search"]
+        XCTAssertTrue(all.waitForExistence(timeout: 15))
+        XCTAssertTrue(search.isHittable)
+        XCTAssertTrue(app.buttons["browser-create"].isHittable)
+        attachScreenshot(app, name: "Folders with bottom actions")
+
+        // Folder-page search includes documents in deeper directories.
+        search.tap()
+        search.typeText("Nested Idea")
+        XCTAssertTrue(app.staticTexts["Nested Idea"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Test Canvas"].exists)
+        app.buttons["清除搜索"].tap()
+        all.tap()
+        XCTAssertTrue(app.staticTexts["Test Canvas"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Nested Idea"].firstMatch.exists)
+        XCTAssertTrue(app.buttons["browser-create"].isHittable)
+        attachScreenshot(app, name: "All documents with bottom actions")
+        search.tap()
+        search.typeText("Test Mind")
+        XCTAssertTrue(app.staticTexts["Test Mind Map"].firstMatch.exists)
+        XCTAssertFalse(app.staticTexts["Test Canvas"].exists)
+        XCTAssertFalse(app.staticTexts["Nested Idea"].exists)
+        app.buttons["清除搜索"].tap()
+        XCTAssertTrue(app.staticTexts["Nested Idea"].firstMatch.exists)
+    }
+
+    func testCreateFromFolderPageAndAllDocuments() {
+        let app = makeApplication()
+        app.launchEnvironment["SIYE_UI_TEST_FIXTURE"] = "browser"
+        app.launch()
+        XCTAssertTrue(app.buttons["browser-create"].waitForExistence(timeout: 15))
+        app.buttons["browser-create"].tap()
+        app.buttons["新建画布"].tap()
+        XCTAssertTrue(app.webViews["editor-ready"].waitForExistence(timeout: 30))
+        app.buttons["返回"].tap()
+        let created = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Untitled-'")).firstMatch
+        XCTAssertTrue(created.waitForExistence(timeout: 10), "Folder-page creation saves into the root")
+        app.buttons["all-documents"].tap()
+        app.buttons["browser-create"].tap()
+        app.buttons["新建思维导图"].tap()
+        XCTAssertTrue(app.webViews["editor-ready"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.webViews.staticTexts["中心主题"].firstMatch.waitForExistence(timeout: 10))
+        app.buttons["返回"].tap()
+        XCTAssertTrue(app.buttons["browser-create"].waitForExistence(timeout: 10))
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Untitled-'")).count, 2)
+    }
+
+    func testNestedFolderSearchAndCreation() {
+        let app = makeApplication()
+        app.launchEnvironment["SIYE_UI_TEST_FIXTURE"] = "browser"
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Projects"].firstMatch.waitForExistence(timeout: 15))
+        app.staticTexts["Projects"].firstMatch.tap()
+        app.staticTexts["Nested"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Nested Idea"].firstMatch.waitForExistence(timeout: 5))
+        let search = app.textFields["browser-search"]
+        XCTAssertTrue(search.isHittable)
+        search.tap()
+        search.typeText("missing")
+        XCTAssertFalse(app.staticTexts["Nested Idea"].exists)
+        app.buttons["清除搜索"].tap()
+        XCTAssertTrue(app.staticTexts["Nested Idea"].exists)
+        app.buttons["browser-create"].tap()
+        app.buttons["新建思维导图"].tap()
+        XCTAssertTrue(app.webViews["editor-ready"].waitForExistence(timeout: 30))
+        app.buttons["返回"].tap()
+        let created = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Untitled-'")).firstMatch
+        XCTAssertTrue(created.waitForExistence(timeout: 10), "Creation saves into the nested folder")
+        attachScreenshot(app, name: "Nested folder with bottom actions")
+    }
+
     private func revealAccessoryButton(_ button: XCUIElement, in accessory: XCUIElement) {
         if !button.isHittable { accessory.scrollViews.firstMatch.swipeLeft() }
         if !button.isHittable { accessory.scrollViews.firstMatch.swipeRight() }
