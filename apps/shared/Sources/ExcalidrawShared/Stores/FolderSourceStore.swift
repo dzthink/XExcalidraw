@@ -157,6 +157,7 @@ public final class FolderSourceStore: ObservableObject {
 
     public func refreshAllIndexes() {
         let sourcesSnapshot = sources
+        guard !sourcesSnapshot.isEmpty else { return }
         let existingEntries = indexedEntries
         indexingQueue.async { [weak self] in
             guard let self else { return }
