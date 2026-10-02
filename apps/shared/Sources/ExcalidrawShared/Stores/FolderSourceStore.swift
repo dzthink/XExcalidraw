@@ -27,6 +27,7 @@ public final class FolderSourceStore: ObservableObject {
     private let storageKey = "folderSources"
     private let activeSourceKey = "activeFolderSourceId"
     private let sourceHistoryKey = "folderSourceHistory"
+    private let aiEnabledKey = "aiEnabled"
     private var activeURLs: [UUID: URL] = [:]
     private let indexStore: ExcalidrawFileIndexStore
     private let indexingQueue: DispatchQueue
@@ -354,7 +355,7 @@ public final class FolderSourceStore: ObservableObject {
         results: inout [ExcalidrawFileEntry]
     ) throws {
         let fileName = itemURL.lastPathComponent.lowercased()
-        guard fileName.hasSuffix(".excalidraw") || fileName.hasSuffix(".excalidraw.json") else {
+        guard SiyeDocumentType(fileName: fileName) != nil else {
             return
         }
         let resourceValues = try itemURL.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey])
@@ -403,11 +404,13 @@ public final class FolderSourceStore: ObservableObject {
         let query = NSMetadataQuery()
         query.searchScopes = [url]
         query.predicate = NSPredicate(
-            format: "%K ENDSWITH[c] %@ OR %K ENDSWITH[c] %@",
+            format: "%K ENDSWITH[c] %@ OR %K ENDSWITH[c] %@ OR %K ENDSWITH[c] %@",
             NSMetadataItemFSNameKey,
             ".excalidraw",
             NSMetadataItemFSNameKey,
-            ".excalidraw.json"
+            ".excalidraw.json",
+            NSMetadataItemFSNameKey,
+            ".mindmap"
         )
         let notificationCenter = NotificationCenter.default
         var observers: [NSObjectProtocol] = []
@@ -532,7 +535,7 @@ public final class FolderSourceStore: ObservableObject {
         lastOpenedAt: Date? = nil
     ) -> ExcalidrawFileEntry? {
         let normalizedName = fileURL.lastPathComponent.lowercased()
-        guard normalizedName.hasSuffix(".excalidraw") || normalizedName.hasSuffix(".excalidraw.json") else { return nil }
+        guard SiyeDocumentType(fileName: normalizedName) != nil else { return nil }
         let resourceValues = try? fileURL.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey])
         guard resourceValues?.isRegularFile ?? true else { return nil }
         let modifiedAt = resourceValues?.contentModificationDate ?? Date()
@@ -673,5 +676,20 @@ public final class FolderSourceStore: ObservableObject {
         }
         #endif
         return nil
+    }
+
+    // MARK: - AI Configuration
+
+    public var isAIEnabled: Bool {
+        get {
+            // Default to true if not set
+            if userDefaults.object(forKey: aiEnabledKey) == nil {
+                return true
+            }
+            return userDefaults.bool(forKey: aiEnabledKey)
+        }
+        set {
+            userDefaults.set(newValue, forKey: aiEnabledKey)
+        }
     }
 }

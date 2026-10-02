@@ -1,4 +1,4 @@
-# XExcalidraw 开发指南
+# Siye 开发指南
 
 ## 快速开始
 
@@ -58,7 +58,7 @@ npm install -g ios-deploy
 **macOS：**
 ```bash
 ./scripts/build_native.sh macos-app
-open build/native/macos/XExcalidraw.app
+open build/native/macos/Siye.app
 ```
 
 ---
@@ -203,10 +203,10 @@ webView.configuration.preferences.setValue(true, forKey: "developerExtrasEnabled
 
 ```bash
 # iOS 设备日志
-ios-deploy --bundle build/native/ios/XExcalidraw.app --debug
+ios-deploy --bundle build/native/ios/Siye.app --debug
 
 # macOS 控制台日志
-log stream --predicate 'process == "XExcalidraw"'
+log stream --predicate 'process == "Siye"'
 ```
 
 ---
@@ -232,13 +232,13 @@ CONFIGURATION=Release ./scripts/build_native.sh macos-app
 
 # 打包 DMG
 create-dmg \
-  --volname "XExcalidraw" \
+  --volname "Siye" \
   --window-pos 200 120 \
   --window-size 800 400 \
   --icon-size 100 \
   --app-drop-link 600 185 \
-  "XExcalidraw.dmg" \
-  "build/native/macos/XExcalidraw.app"
+  "Siye.dmg" \
+  "build/native/macos/Siye.app"
 ```
 
 ---

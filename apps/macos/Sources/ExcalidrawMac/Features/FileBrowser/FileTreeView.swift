@@ -13,7 +13,7 @@ struct FileTreeNodeView: View {
     let onCommitRename: (ExcalidrawFileEntry, String) -> Void
     let onCancelRename: () -> Void
     let onDelete: (ExcalidrawFileEntry) -> Void
-    let onCreateFile: (FileTreeNode) -> Void
+    let onCreateFile: (FileTreeNode, SiyeDocumentType) -> Void
     let onCreateFolder: (FileTreeNode) -> Void
     let onDeleteFolder: (FileTreeNode) -> Void
 
@@ -79,7 +79,7 @@ struct FileTreeContentView: View {
     let onCommitRename: (ExcalidrawFileEntry, String) -> Void
     let onCancelRename: () -> Void
     let onDelete: (ExcalidrawFileEntry) -> Void
-    let onCreateFile: (FileTreeNode) -> Void
+    let onCreateFile: (FileTreeNode, SiyeDocumentType) -> Void
     let onCreateFolder: (FileTreeNode) -> Void
     let onDeleteFolder: (FileTreeNode) -> Void
 
@@ -112,7 +112,7 @@ struct FolderRowView: View {
     let level: Int
     @Binding var editingEntryId: UUID?
     @Binding var editingFileName: String
-    let onCreateFile: (FileTreeNode) -> Void
+    let onCreateFile: (FileTreeNode, SiyeDocumentType) -> Void
     let onCreateFolder: (FileTreeNode) -> Void
     let onDeleteFolder: (FileTreeNode) -> Void
 
@@ -167,9 +167,14 @@ struct FolderRowView: View {
         .padding(.vertical, 1)
         .contextMenu {
             Button {
-                onCreateFile(node)
+                onCreateFile(node, .excalidraw)
             } label: {
-                Label("Create File", systemImage: "doc.badge.plus")
+                Label("New Drawing", systemImage: "scribble.variable")
+            }
+            Button {
+                onCreateFile(node, .mindmap)
+            } label: {
+                Label("New Mind Map", systemImage: "point.3.connected.trianglepath.dotted")
             }
 
             Button {
@@ -250,6 +255,11 @@ struct FileRowView: View {
                         Color.clear
                             .frame(width: 20)
 
+                        Image(systemName: SiyeDocumentType(fileName: entry.fileName) == .mindmap
+                              ? "point.3.connected.trianglepath.dotted" : "scribble.variable")
+                            .font(.system(size: 12))
+                            .frame(width: 16)
+
                         Text(displayFileName)
                             .font(.system(size: 13))
                             .lineLimit(1)
@@ -314,7 +324,7 @@ struct FileRowView: View {
 
     let root = FileTreeBuilder.buildTree(entries: entries, folderName: "dzx")
 
-    return List {
+    List {
         Section("Documents") {
             FileTreeContentView(
                 node: root,
@@ -326,7 +336,7 @@ struct FileRowView: View {
                 onCommitRename: { _, _ in },
                 onCancelRename: {},
                 onDelete: { _ in },
-                onCreateFile: { _ in },
+                onCreateFile: { _, _ in },
                 onCreateFolder: { _ in },
                 onDeleteFolder: { _ in }
             )

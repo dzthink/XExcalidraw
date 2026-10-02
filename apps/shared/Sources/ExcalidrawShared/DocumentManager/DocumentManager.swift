@@ -58,6 +58,8 @@ public final class DocumentManager: ObservableObject {
 
     private let store: FolderSourceStore
     private let saveQueue: DispatchQueue
+    // Accessed only on saveQueue, including rename operations.
+    private var renamedDocumentURLs: [String: URL] = [:]
     private var cancellables: Set<AnyCancellable> = []
     private let draftDirectory: URL
 
@@ -121,8 +123,36 @@ public final class DocumentManager: ObservableObject {
         return DocumentScene(docId: updatedEntry.fileURL.path, sceneJson: jsonObject, readOnly: false)
     }
     
+    /// Read cloud-backed documents off the UI thread; callers activate only the accepted result.
+    public func read(entry: ExcalidrawFileEntry, completion: @escaping (Result<DocumentScene, Error>) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = Result<DocumentScene, Error> {
+                let data = try Data(contentsOf: entry.fileURL)
+                let json = try JSONSerialization.jsonObject(with: data)
+                return DocumentScene(docId: entry.fileURL.path, sceneJson: json, readOnly: false)
+            }
+            DispatchQueue.main.async { completion(result) }
+        }
+    }
+
+    public func activate(entry: ExcalidrawFileEntry) {
+        currentEntry = store.updateLastOpenedAt(for: entry.fileURL, date: Date()) ?? entry
+        activeFolderId = entry.folderId
+    }
+
     public func clearCurrentEntry() {
         currentEntry = nil
+    }
+
+    public func attachmentContext(docId: String) -> (documentURL: URL, repositoryURL: URL)? {
+        guard let entry = currentEntry,
+              entry.fileURL.path == docId,
+              entry.fileURL.pathExtension.lowercased() == "mindmap",
+              let source = sources.first(where: { $0.id == entry.folderId }),
+              let rootURL = store.resolveURL(for: source) else {
+            return nil
+        }
+        return (entry.fileURL, rootURL)
     }
 
     public func importScene(
@@ -133,7 +163,7 @@ public final class DocumentManager: ObservableObject {
             guard let self else { return }
             do {
                 let sceneJson = try self.loadImportScene(from: fileURL)
-                let targetName = self.makeImportDocumentName(from: fileURL)
+                let targetName = self.makeImportDocumentName(from: fileURL) + (fileURL.pathExtension.lowercased() == "mindmap" ? ".mindmap" : "")
                 let targetURL = try self.resolveSaveURL(docId: targetName)
                 let jsonData = try JSONSerialization.data(withJSONObject: sceneJson, options: [.prettyPrinted])
                 try jsonData.write(to: targetURL, options: [.atomic])
@@ -192,6 +222,7 @@ public final class DocumentManager: ObservableObject {
 
     public func createBlankDocument(
         in folderId: UUID? = nil,
+        type: SiyeDocumentType = .excalidraw,
         completion: @escaping (Result<DocumentScene, Error>) -> Void
     ) {
         saveQueue.async { [weak self] in
@@ -216,11 +247,8 @@ public final class DocumentManager: ObservableObject {
                 return
             }
             
-            let fileURL = self.makeUntitledFileURL(in: targetFolderURL)
-            let sceneJson: [String: Any] = [
-                "elements": [],
-                "appState": [:]
-            ]
+            let fileURL = self.makeUntitledFileURL(in: targetFolderURL, type: type)
+            let sceneJson = type.blankScene
             do {
                 let jsonData = try JSONSerialization.data(withJSONObject: sceneJson, options: [.prettyPrinted])
                 try jsonData.write(to: fileURL, options: [.atomic])
@@ -273,8 +301,12 @@ public final class DocumentManager: ObservableObject {
         guard let entry = currentEntry else {
             throw DocumentManagerError.noCurrentEntry
         }
-        
-        let sanitizedName = newName.hasSuffix(".excalidraw") ? newName : "\(newName).excalidraw"
+        try renameEntry(entry, to: newName)
+    }
+
+    public func renameEntry(_ entry: ExcalidrawFileEntry, to newName: String) throws {
+        let suffix = entry.fileName.lowercased().hasSuffix(".excalidraw.json") ? ".excalidraw.json" : (SiyeDocumentType(fileName: entry.fileName)?.fileExtension ?? ".excalidraw")
+        let sanitizedName = "\(SiyeDocumentType.displayName(from: newName))\(suffix)"
         let directory = entry.fileURL.deletingLastPathComponent()
         let newURL = directory.appendingPathComponent(sanitizedName)
         
@@ -283,19 +315,27 @@ public final class DocumentManager: ObservableObject {
             throw DocumentManagerError.fileAlreadyExists
         }
         
-        // Perform rename
-        try FileManager.default.moveItem(at: entry.fileURL, to: newURL)
-        
-        // Update index
+        guard newURL != entry.fileURL else { return }
+
+        // Drain pending writes before moving, and redirect late bridge saves afterward.
+        try saveQueue.sync {
+            try FileManager.default.moveItem(at: entry.fileURL, to: newURL)
+            for oldPath in Array(renamedDocumentURLs.keys) where renamedDocumentURLs[oldPath] == entry.fileURL {
+                renamedDocumentURLs[oldPath] = newURL
+            }
+            renamedDocumentURLs[entry.fileURL.path] = newURL
+        }
         store.updateEntryAfterRename(id: entry.id, newFileURL: newURL, newFileName: sanitizedName)
-        
-        // Update current entry
-        if let updated = store.indexedEntries.first(where: { $0.id == entry.id }) {
+        if currentEntry?.id == entry.id,
+           let updated = store.indexedEntries.first(where: { $0.id == entry.id }) {
             currentEntry = updated
         }
     }
 
     private func resolveSaveURL(docId: String) throws -> URL {
+        if let renamedURL = renamedDocumentURLs[docId] {
+            return renamedURL
+        }
         if let currentEntry, docId == currentEntry.fileURL.path {
             return currentEntry.fileURL
         }
@@ -309,7 +349,7 @@ public final class DocumentManager: ObservableObject {
             throw DocumentManagerError.missingFolder
         }
 
-        let fileName = docId.hasSuffix(".excalidraw") ? docId : "\(docId).excalidraw"
+        let fileName = SiyeDocumentType(fileName: docId) != nil ? docId : "\(docId).excalidraw"
         return folderURL.appendingPathComponent(fileName)
     }
 
@@ -331,6 +371,7 @@ public final class DocumentManager: ObservableObject {
     }
 
     private func updateIndexAfterSave(fileURL: URL) -> ExcalidrawFileEntry? {
+        let fileURL = saveQueue.sync { renamedDocumentURLs[fileURL.path] ?? fileURL }
         if let updated = store.updateEntryAfterSave(for: fileURL) {
             currentEntry = updated
             return updated
@@ -451,7 +492,7 @@ public final class DocumentManager: ObservableObject {
         let fileName = fileURL.lastPathComponent.lowercased()
         let fileExtension = fileURL.pathExtension.lowercased()
         let data = try Data(contentsOf: fileURL)
-        if fileExtension == "excalidraw" {
+        if fileExtension == "excalidraw" || fileExtension == "mindmap" {
             return try JSONSerialization.jsonObject(with: data)
         }
         if fileName.hasSuffix(".excalidraw.json") {
@@ -476,18 +517,18 @@ public final class DocumentManager: ObservableObject {
         return baseName.isEmpty ? UUID().uuidString : baseName
     }
 
-    private func makeUntitledFileURL(in folderURL: URL) -> URL {
+    private func makeUntitledFileURL(in folderURL: URL, type: SiyeDocumentType) -> URL {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         let timestamp = formatter.string(from: Date())
         let baseName = "Untitled-\(timestamp)"
         var candidate = baseName
         var counter = 1
-        var fileURL = folderURL.appendingPathComponent("\(candidate).excalidraw")
+        var fileURL = folderURL.appendingPathComponent("\(candidate)\(type.fileExtension)")
         while FileManager.default.fileExists(atPath: fileURL.path) {
             candidate = "\(baseName)-\(counter)"
             counter += 1
-            fileURL = folderURL.appendingPathComponent("\(candidate).excalidraw")
+            fileURL = folderURL.appendingPathComponent("\(candidate)\(type.fileExtension)")
         }
         return fileURL
     }

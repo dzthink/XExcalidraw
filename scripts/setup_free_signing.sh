@@ -9,7 +9,7 @@ IOS_PROJECT="$ROOT_DIR/apps/_legacy_xcode/ExcalidrawIOS.xcodeproj"
 MAC_PROJECT="$ROOT_DIR/apps/_legacy_xcode/ExcalidrawMac.xcodeproj"
 
 echo "========================================"
-echo "XExcalidraw 免费开发者账号配置"
+echo "Siye 免费开发者账号配置"
 echo "========================================"
 echo ""
 

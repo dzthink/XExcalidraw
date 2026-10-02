@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Siye macOS icon">
+  <rect width="1024" height="1024" rx="220" fill="#173F3C"/>
+  <path
+    d="M675 323C600 254 468 258 381 327C291 398 296 487 426 503L584 522C707 537 738 623 641 703C549 779 417 765 339 697"
+    fill="none"
+    stroke="#F6F1E8"
+    stroke-width="96"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <circle cx="730" cy="269" r="49" fill="#F0B86A"/>
+</svg>

@@ -1,6 +1,10 @@
-# XExcalidraw
+# Siye · 思野
 
-跨平台的 Excalidraw 原生应用，支持 iOS 和 macOS，内置 Web 画布宿主。
+![Siye 图标](web/canvas-host/public/siye-logo.svg)
+
+让想法自由生长。Siye 是面向 iOS 和 macOS 的思考工具，按文件扩展名打开两种编辑器：`.excalidraw`（以及 `.excalidraw.json`）使用 Excalidraw 画布，`.mindmap` 使用 [Mind Elixir](https://github.com/SSShooter/mind-elixir-core) 思维导图。两种文件可以放在同一个已挂载文件夹中创建、浏览和保存。
+
+在思维导图中，双击节点可在节点内编辑多行 Markdown。节点支持 LaTeX 公式（`$...$` 或 `$$...$$`），也能直接粘贴图片。图片文件保存在当前仓库根目录的 `attachments/` 中，节点 Markdown 使用相对于 `.mindmap` 文件的路径引用。悬停节点可查看备注；首次添加备注可右键选择“编辑备注”，已有备注的节点可点击备注图标，在节点旁的小弹窗中编辑或预览。顶部可切换导图与大纲视图。
 
 ## 项目结构
 
@@ -10,7 +14,7 @@ apps/
   macos/          # SwiftUI macOS 应用  
   shared/         # 共享 Swift 包（模型 + 桥接类型）
 web/
-  canvas-host/    # React + Excalidraw 宿主应用
+  canvas-host/    # React + Excalidraw / Mind Elixir 宿主应用
 scripts/
   build_web.sh         # 构建 Web 宿主
   build_native.sh      # 构建原生应用（iOS/macOS）
@@ -157,7 +161,7 @@ DEFAULT_IOS_PROVISIONING_PROFILE="/path/to/your.mobileprovision"
 open apps/_legacy_xcode/ExcalidrawMac.xcodeproj
 ```
 
-构建产物：`build/native/macos/XExcalidraw.app`
+构建产物：`build/native/macos/Siye.app`
 
 ---
 

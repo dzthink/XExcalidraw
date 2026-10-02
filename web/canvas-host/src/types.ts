@@ -47,6 +47,10 @@ export type RequestAIPayload = {
   prompt?: string;
 };
 
+export type AIConfigPayload = {
+  enabled: boolean;
+};
+
 export type WebReadyPayload = {
   ready: boolean;
 };
@@ -60,15 +64,38 @@ export type UpdateDocIdPayload = {
   docId: string;
 };
 
+export type SaveAttachmentPayload = {
+  requestId: string;
+  docId: string;
+  mimeType: string;
+  dataBase64: string;
+};
+
+export type AttachmentSavedPayload = {
+  requestId: string;
+  relativePath: string;
+};
+
+export type AttachmentSaveFailedPayload = {
+  requestId: string;
+  error: string;
+};
+
 export type NativeToWebMessage =
   | BridgeEnvelope<LoadScenePayload>
   | BridgeEnvelope<UpdateDocIdPayload>
   | BridgeEnvelope<SetAppStatePayload>
-  | BridgeEnvelope<RequestExportPayload>;
+  | BridgeEnvelope<RequestExportPayload>
+  | BridgeEnvelope<AIConfigPayload>
+  | BridgeEnvelope<AttachmentSavedPayload>
+  | BridgeEnvelope<AttachmentSaveFailedPayload>;
 
 export type WebToNativeMessage =
+  | BridgeEnvelope<Record<string, unknown>>
   | BridgeEnvelope<DidChangePayload>
   | BridgeEnvelope<SaveScenePayload>
   | BridgeEnvelope<RequestAIPayload>
   | BridgeEnvelope<WebReadyPayload>
-  | BridgeEnvelope<ExportResultPayload>;
+  | BridgeEnvelope<ExportResultPayload>
+  | BridgeEnvelope<SaveAttachmentPayload>
+  | BridgeEnvelope<{ cursor: string }>;

@@ -49,8 +49,8 @@ IOS_PROVISIONING_PROFILE="${IOS_PROVISIONING_PROFILE:-$DEFAULT_IOS_PROVISIONING_
 IOS_TRIPLE="${IOS_TRIPLE:-}"  # Auto-detect if empty
 
 OUTPUT_DIR="${OUTPUT_DIR:-$ROOT_DIR/build/native}"
-IOS_TARGET="XExcalidraw"
-MAC_TARGET="XExcalidraw"
+IOS_TARGET="Siye"
+MAC_TARGET="Siye"
 IOS_BUNDLE_ID="${IOS_BUNDLE_ID:-com.xexcalidraw.ios}"
 MAC_BUNDLE_ID="${MAC_BUNDLE_ID:-com.xexcalidraw.macos}"
 MARKETING_VERSION="${MARKETING_VERSION:-1.0}"
@@ -242,7 +242,7 @@ write_ios_info_plist() {
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleDisplayName</key>
-  <string>XExcalidraw</string>
+  <string>Siye</string>
   <key>CFBundleExecutable</key>
   <string>$IOS_TARGET</string>
   <key>CFBundleIdentifier</key>
@@ -321,7 +321,7 @@ write_macos_info_plist() {
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleDisplayName</key>
-  <string>XExcalidraw</string>
+  <string>Siye</string>
   <key>CFBundleExecutable</key>
   <string>$MAC_TARGET</string>
   <key>CFBundleIdentifier</key>
@@ -368,8 +368,8 @@ compile_assets() {
     --output-partial-info-plist "$output_dir/Assets-partial.plist" \
     "$xcassets_path" 2>&1 | grep -v "^-" || true
   
-  # For macOS, also generate a proper .icns file with all sizes using iconutil
-  if [[ "$platform" == "macosx" ]]; then
+  # actool normally writes the macOS .icns. Use iconutil only when it does not.
+  if [[ "$platform" == "macosx" && ! -f "$output_dir/AppIcon.icns" ]]; then
     generate_macos_icns "$xcassets_path" "$output_dir"
   fi
 }
@@ -418,7 +418,7 @@ copy_resource_bundles() {
   local bundle
   while IFS= read -r -d '' bundle; do
     cp -R "$bundle" "$dest_dir/"
-  done < <(find "$bin_path" -maxdepth 1 -name "*.bundle" -print0)
+  done < <(find "$bin_path" -maxdepth 1 -name "Siye_*.bundle" -print0)
 }
 
 ensure_web_dist() {

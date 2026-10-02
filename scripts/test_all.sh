@@ -35,7 +35,7 @@ xcodebuild build-for-testing \
   -configuration Debug \
   -derivedDataPath "$DERIVED_DATA_ROOT/macos"
 
-WEB_COPY_DEST="$DERIVED_DATA_ROOT/macos/Build/Products/Debug/ExcalidrawMac.app/Contents/Resources" \
+WEB_COPY_DEST="$DERIVED_DATA_ROOT/macos/Build/Products/Debug/Siye.app/Contents/Resources" \
   WEB_SKIP_BUILD=1 \
   ./scripts/build_web.sh
 
@@ -70,7 +70,7 @@ xcodebuild build-for-testing \
   -configuration Debug \
   -derivedDataPath "$DERIVED_DATA_ROOT/ios"
 
-WEB_COPY_DEST="$DERIVED_DATA_ROOT/ios/Build/Products/Debug-iphonesimulator/ExcalidrawIOS.app" \
+WEB_COPY_DEST="$DERIVED_DATA_ROOT/ios/Build/Products/Debug-iphonesimulator/Siye.app" \
   WEB_SKIP_BUILD=1 \
   ./scripts/build_web.sh
 

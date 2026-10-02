@@ -1,5 +1,5 @@
 import XCTest
-@testable import ExcalidrawMac
+@testable import XExcalidrawMac
 @testable import ExcalidrawShared
 
 final class FileTreeViewTests: XCTestCase {

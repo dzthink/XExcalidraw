@@ -13,6 +13,7 @@
 		3FED97BE76DF40F3A5B988F9 /* FolderSourcesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C83305FC4F284BB89EBE756F /* FolderSourcesView.swift */; };
 		143516772B52433F8CF30187 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A8B49241F5F0413399F023D9 /* Assets.xcassets */; };
 		322BDC48235542129930C7B6 /* ExcalidrawShared in Frameworks */ = {isa = PBXBuildFile; productRef = 6C550E59C3CB41EC8B811694 /* ExcalidrawShared */; };
+		A1D58986F34943FD8DC01001 /* FileTreeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1D58986F34943FD8DC01002 /* FileTreeView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -25,7 +26,8 @@
 		D746F8887EC54D03BBB3029C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A8B49241F5F0413399F023D9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		2A7A00FA0E4442B492D0C0B3 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
-		02918E5BB251420DBA4C5C2A /* ExcalidrawMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = ExcalidrawMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		02918E5BB251420DBA4C5C2A /* Siye.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = Siye.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1D58986F34943FD8DC01002 /* FileTreeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../macos/Sources/ExcalidrawMac/Features/FileBrowser/FileTreeView.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXContainerItemProxy section */
@@ -115,6 +117,7 @@
 			isa = PBXGroup;
 			children = (
 				3D2218EC300046959FE0E5A9 /* FolderSources */,
+				A1D58986F34943FD8DC01002 /* FileTreeView.swift */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -156,7 +159,7 @@
 		994707BF43574C42AA0FEA2E /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				02918E5BB251420DBA4C5C2A /* ExcalidrawMac.app */,
+				02918E5BB251420DBA4C5C2A /* Siye.app */,
 				44F5A0C09E664977918B0F73 /* ExcalidrawMacUITests.xctest */,
 			);
 			name = Products;
@@ -200,7 +203,7 @@
 				6C550E59C3CB41EC8B811694 /* ExcalidrawShared */,
 			);
 			productName = ExcalidrawMac;
-			productReference = 02918E5BB251420DBA4C5C2A /* ExcalidrawMac.app */;
+			productReference = 02918E5BB251420DBA4C5C2A /* Siye.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -278,6 +281,7 @@
 			files = (
 				0BD920F65FE24EC0AE5C45E8 /* ExcalidrawMacApp.swift in Sources */,
 				3FED97BE76DF40F3A5B988F9 /* FolderSourcesView.swift in Sources */,
+				A1D58986F34943FD8DC01001 /* FileTreeView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -369,7 +373,7 @@ CODE_SIGNING_ALLOWED = YES;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.excalidraw.macos;
-				PRODUCT_NAME = XExcalidraw;
+				PRODUCT_NAME = Siye;
 				ARCHS = arm64;
 				ONLY_ACTIVE_ARCH = YES;
 				SWIFT_VERSION = 5.9;
@@ -389,7 +393,7 @@ CODE_SIGNING_ALLOWED = YES;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.excalidraw.macos;
-				PRODUCT_NAME = XExcalidraw;
+				PRODUCT_NAME = Siye;
 				ARCHS = arm64;
 				ONLY_ACTIVE_ARCH = YES;
 				SWIFT_VERSION = 5.9;

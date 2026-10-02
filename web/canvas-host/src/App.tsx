@@ -7,6 +7,8 @@ import {
 } from "@excalidraw/excalidraw";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import "./excalidraw.css";
+import MindElixir from "mind-elixir";
+import MindMapEditor from "./MindMapEditor";
 import {
   addBridgeListener,
   initializeBridge,
@@ -76,16 +78,19 @@ const getAppStateUpdate = (
 
 export default function App() {
   const excalidrawApi = useRef<ExcalidrawImperativeAPI | null>(null);
+  const [sceneLoadKey, setSceneLoadKey] = useState(0);
+  const mindMapApi = useRef<MindElixir | null>(null);
+  const mindMapDocument = useRef<(() => unknown) | null>(null);
   const preferredThemeRef = useRef<"light" | "dark" | null>(getInitialPreferredTheme());
   const [isApiReady, setIsApiReady] = useState(false);
+  const [mapReady, setMapReady] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark">(getInitialPreferredTheme() ?? "light");
   const [loadState, setLoadState] = useState<LoadState>({
     docId: "",
     sceneJson: null,
     readOnly: false
   });
   const [fontsReady, setFontsReady] = useState(false);
-  const [aiPanelOpen, setAiPanelOpen] = useState(false);
-  const [aiPrompt, setAiPrompt] = useState("");
   const saveTimeout = useRef<number | null>(null);
   const didSendReady = useRef(false);
   const isApplyingScene = useRef(false);
@@ -119,7 +124,7 @@ export default function App() {
       elements,
       appState,
       files
-    } as Parameters<ExcalidrawImperativeAPI["updateScene"]>[0];
+    } as unknown as Parameters<ExcalidrawImperativeAPI["updateScene"]>[0];
   }, [coerceSceneJson]);
 
   const scheduleSave = useCallback(
@@ -195,6 +200,7 @@ export default function App() {
     async (message: { type: string; payload: unknown }) => {
       if (message.type === "loadScene") {
         const payload = message.payload as LoadScenePayload;
+        setSceneLoadKey(value => value + 1);
         setLoadState({
           docId: payload.docId,
           sceneJson: coerceSceneJson(payload.sceneJson),
@@ -212,13 +218,14 @@ export default function App() {
         return;
       }
       if (message.type === "setAppState") {
-        const api = excalidrawApi.current;
-        if (!api) {
-          return;
-        }
         const payload = message.payload as SetAppStatePayload;
         if (payload.theme === "light" || payload.theme === "dark") {
           preferredThemeRef.current = payload.theme;
+          setTheme(payload.theme);
+        }
+        const api = excalidrawApi.current;
+        if (!api) {
+          return;
         }
         const appStateUpdate = getAppStateUpdate(payload);
         if (!appStateUpdate) {
@@ -227,6 +234,20 @@ export default function App() {
         api.updateScene({ appState: appStateUpdate });
       }
       if (message.type === "requestExport") {
+        const map = mindMapApi.current;
+        if (map || mindMapDocument.current) {
+          const payload = message.payload as RequestExportPayload;
+          const blob = payload.format === "json"
+            ? new Blob([JSON.stringify(mindMapDocument.current?.() ?? map?.getData())], { type: "application/json" })
+            : await window.siyeExport?.(payload.format === "svg" ? "svg" : "png");
+          if (blob) {
+            const bytes = new Uint8Array(await blob.arrayBuffer());
+            let binary = "";
+            bytes.forEach(byte => { binary += String.fromCharCode(byte); });
+            sendToNative(sendEnvelope("exportResult", { format: payload.format, dataBase64: btoa(binary) }));
+          }
+          return;
+        }
         const api = excalidrawApi.current;
         if (!api) {
           return;
@@ -292,18 +313,6 @@ export default function App() {
     [coerceSceneJson]
   );
 
-  const requestAiScene = useCallback(() => {
-    if (!loadState.docId) {
-      return;
-    }
-    sendToNative(
-      sendEnvelope("requestAI", {
-        docId: loadState.docId,
-        prompt: aiPrompt.trim() ? aiPrompt.trim() : undefined
-      })
-    );
-  }, [aiPrompt, loadState.docId]);
-
   useEffect(() => {
     initializeBridge();
     const unsubscribe = addBridgeListener((message) => {
@@ -340,7 +349,7 @@ export default function App() {
 
   // Apply scene when docId changes (new document loaded)
   useEffect(() => {
-    if (!isApiReady || !loadState.docId) {
+    if (!isApiReady || !loadState.docId || loadState.docId.toLowerCase().endsWith(".mindmap")) {
       return;
     }
     // Always apply scene when docId changes to ensure content is loaded
@@ -366,12 +375,12 @@ export default function App() {
   }, [loadState.docId]);
 
   useEffect(() => {
-    if (!isApiReady || didSendReady.current) {
+    if ((!isApiReady && !mapReady) || didSendReady.current) {
       return;
     }
     didSendReady.current = true;
     sendToNative(sendEnvelope("webReady", { ready: true }));
-  }, [isApiReady]);
+  }, [isApiReady, mapReady]);
 
   const initialScene = useMemo(() => {
     return normalizeScene(loadState.sceneJson);
@@ -379,7 +388,20 @@ export default function App() {
 
   return (
     <div className="app-root">
-      <Excalidraw
+      {loadState.docId.toLowerCase().endsWith(".mindmap") ? (
+        <MindMapEditor
+          key={sceneLoadKey}
+          docId={loadState.docId}
+          data={loadState.sceneJson}
+          readOnly={loadState.readOnly}
+          theme={theme}
+          onDocumentReady={getDocument => { mindMapDocument.current = getDocument; }}
+          onReady={instance => {
+            mindMapApi.current = instance;
+            setMapReady(Boolean(instance));
+          }}
+        />
+      ) : <Excalidraw
         key={loadState.docId || "default"}
         excalidrawAPI={handleExcalidrawAPI}
         initialData={initialScene as never}
@@ -410,57 +432,11 @@ export default function App() {
           );
           scheduleSave(loadState.docId);
         }}
-      />
-      {!fontsReady ? (
+      />}
+      {!loadState.docId.toLowerCase().endsWith(".mindmap") && !fontsReady ? (
         <div className="font-loading-overlay" aria-label="Loading fonts">
           <div className="font-loading-card">Loading fonts…</div>
         </div>
-      ) : null}
-      <button
-        className="ai-panel-trigger"
-        type="button"
-        onClick={() => setAiPanelOpen((open) => !open)}
-        aria-expanded={aiPanelOpen}
-      >
-        AI
-      </button>
-      {aiPanelOpen ? (
-        <aside className="ai-panel" aria-label="AI 面板">
-          <div className="ai-panel-header">
-            <span>AI 面板</span>
-            <button
-              className="ai-panel-close"
-              type="button"
-              onClick={() => setAiPanelOpen(false)}
-              aria-label="关闭 AI 面板"
-            >
-              ×
-            </button>
-          </div>
-          <div className="ai-panel-empty">
-            <h3>AI 能力尚未接入</h3>
-            <p>这里将显示 AI 生成画布的结果预览与操作。</p>
-            <p className="ai-panel-empty-hint">目前支持发送提示词到 Native 层。</p>
-          </div>
-          <label className="ai-panel-label" htmlFor="ai-prompt">
-            提示词
-          </label>
-          <textarea
-            id="ai-prompt"
-            className="ai-panel-input"
-            placeholder="描述你想生成的画面..."
-            value={aiPrompt}
-            onChange={(event) => setAiPrompt(event.target.value)}
-          />
-          <button
-            className="ai-panel-action"
-            type="button"
-            onClick={requestAiScene}
-            disabled={!loadState.docId}
-          >
-            发送到 AI
-          </button>
-        </aside>
       ) : null}
     </div>
   );

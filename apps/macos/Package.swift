@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "XExcalidraw",
+    name: "Siye",
     platforms: [
         .macOS(.v13)
     ],
     products: [
-        .executable(name: "XExcalidraw", targets: ["XExcalidrawMac"])
+        .executable(name: "Siye", targets: ["XExcalidrawMac"])
     ],
     dependencies: [
         .package(path: "../shared")

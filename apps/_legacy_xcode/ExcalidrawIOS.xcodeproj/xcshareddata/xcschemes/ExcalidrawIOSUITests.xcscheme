@@ -15,7 +15,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "179C5053A07B4FA68866595F"
-               BuildableName = "XExcalidraw.app"
+               BuildableName = "Siye.app"
                BlueprintName = "ExcalidrawIOS"
                ReferencedContainer = "container:ExcalidrawIOS.xcodeproj">
             </BuildableReference>

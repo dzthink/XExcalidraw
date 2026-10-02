@@ -1,5 +1,5 @@
 import XCTest
-@testable import ExcalidrawMac
+@testable import XExcalidrawMac
 
 final class ExcalidrawMacTests: XCTestCase {
     func testDisplayNameHidesExcalidrawExtension() {
@@ -18,14 +18,14 @@ final class ExcalidrawMacTests: XCTestCase {
 
     func testNormalizedFileNameAppendsExcalidrawExtension() {
         XCTAssertEqual(
-            ExcalidrawFileName.normalizedFileName(from: "diagram"),
+            ExcalidrawFileName.normalizedFileName(from: "diagram", originalFileName: "original.excalidraw"),
             "diagram.excalidraw"
         )
     }
 
     func testNormalizedFileNameKeepsExistingExcalidrawExtension() {
         XCTAssertEqual(
-            ExcalidrawFileName.normalizedFileName(from: "diagram.excalidraw"),
+            ExcalidrawFileName.normalizedFileName(from: "diagram.excalidraw", originalFileName: "original.excalidraw"),
             "diagram.excalidraw"
         )
     }
