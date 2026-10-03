@@ -1090,6 +1090,7 @@ struct BrowserBottomBar: View {
                 .background(.regularMaterial, in: Circle())
                 .overlay(Circle().stroke(.quaternary, lineWidth: 0.5))
             }
+            .tint(.primary)
             .disabled(isCreating)
             .accessibilityLabel("新建文档")
             .accessibilityIdentifier("browser-create")
