@@ -1,0 +1,65 @@
+{
+  "results" : [
+    {
+      "mode" : "outline",
+      "mount_to_two_raf_ms" : 191,
+      "mounted_editors" : 100,
+      "nodes" : 100,
+      "raf_interval_p95_ms" : 17,
+      "transaction_with_react_commit_p50_ms" : 1,
+      "transaction_with_react_commit_p95_ms" : 4
+    },
+    {
+      "mode" : "map",
+      "mount_to_two_raf_ms" : 58,
+      "mounted_editors" : 1,
+      "nodes" : 100,
+      "raf_interval_p95_ms" : 18,
+      "transaction_with_react_commit_p50_ms" : 1,
+      "transaction_with_react_commit_p95_ms" : 2
+    },
+    {
+      "mode" : "outline",
+      "mount_to_two_raf_ms" : 68,
+      "mounted_editors" : 500,
+      "nodes" : 500,
+      "raf_interval_p95_ms" : 18,
+      "transaction_with_react_commit_p50_ms" : 3,
+      "transaction_with_react_commit_p95_ms" : 4
+    },
+    {
+      "mode" : "map",
+      "mount_to_two_raf_ms" : 225,
+      "mounted_editors" : 1,
+      "nodes" : 500,
+      "raf_interval_p95_ms" : 30,
+      "transaction_with_react_commit_p50_ms" : 6,
+      "transaction_with_react_commit_p95_ms" : 7
+    },
+    {
+      "mode" : "outline",
+      "mount_to_two_raf_ms" : 130,
+      "mounted_editors" : 1000,
+      "nodes" : 1000,
+      "raf_interval_p95_ms" : 18,
+      "transaction_with_react_commit_p50_ms" : 6,
+      "transaction_with_react_commit_p95_ms" : 7
+    },
+    {
+      "mode" : "map",
+      "mount_to_two_raf_ms" : 636,
+      "mounted_editors" : 1,
+      "nodes" : 1000,
+      "raf_interval_p95_ms" : 104,
+      "transaction_with_react_commit_p50_ms" : 20,
+      "transaction_with_react_commit_p95_ms" : 21
+    }
+  ],
+  "samples" : 30,
+  "userAgent" : "Mozilla\/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit\/605.1.15 (KHTML, like Gecko)",
+  "viewport" : [
+    1280,
+    900
+  ],
+  "warmup" : 5
+}

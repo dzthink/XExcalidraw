@@ -7,33 +7,23 @@ final class ExcalidrawMacUITests: XCTestCase {
 
     func testCanvasLoads() throws {
         let app = XCUIApplication()
+        app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
+        app.launchEnvironment["SIYE_UI_TEST_FIXTURE"] = "documents"
         app.launch()
-        let status = app.staticTexts["canvas-status"]
-        XCTAssertTrue(status.waitForExistence(timeout: 5))
-        let predicate = NSPredicate(format: "label == %@ OR value == %@", "Canvas ready", "Canvas ready")
-        let readyExpectation = XCTNSPredicateExpectation(predicate: predicate, object: status)
-        let result = XCTWaiter.wait(for: [readyExpectation], timeout: 20)
-        if result != .completed {
-            let valueText = status.value as? String ?? ""
-            let labelText = status.label
-            XCTFail("Canvas not ready. Current status: label=\(labelText) value=\(valueText)")
-        }
-
-        let styleStatus = app.staticTexts["canvas-style-status"]
-        XCTAssertTrue(styleStatus.waitForExistence(timeout: 5))
-        let stylePredicate = NSPredicate(format: "label == %@ OR value == %@", "Styles ready", "Styles ready")
-        let styleExpectation = XCTNSPredicateExpectation(predicate: stylePredicate, object: styleStatus)
-        let styleResult = XCTWaiter.wait(for: [styleExpectation], timeout: 20)
-        if styleResult != .completed {
-            let valueText = styleStatus.value as? String ?? ""
-            let labelText = styleStatus.label
-            XCTFail("Styles not ready. Current status: label=\(labelText) value=\(valueText)")
-        }
+        app.activate()
+        if !app.windows.firstMatch.waitForExistence(timeout: 3) { app.typeKey("n", modifierFlags: .command) }
+        XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.descendants(matching: .any)["canvas-ready"].waitForExistence(timeout: 30), app.debugDescription)
     }
 
     func testSidebarToggleButtonChangesAccessibilityLabel() throws {
         let app = XCUIApplication()
+        app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
+        app.launchEnvironment["SIYE_UI_TEST_FIXTURE"] = "documents"
         app.launch()
+        app.activate()
+        if !app.windows.firstMatch.waitForExistence(timeout: 3) { app.typeKey("n", modifierFlags: .command) }
+        XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
 
         let toggleButton = app.buttons["sidebar-toggle-button"]
         XCTAssertTrue(toggleButton.waitForExistence(timeout: 10))

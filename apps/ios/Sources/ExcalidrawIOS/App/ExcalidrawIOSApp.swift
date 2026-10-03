@@ -98,17 +98,31 @@ private final class CanvasSession: ObservableObject {
         let manager: DocumentManager
 #if DEBUG
         if let fixture = ProcessInfo.processInfo.environment["SIYE_UI_TEST_FIXTURE"] {
+            UIApplication.shared.isIdleTimerDisabled = true
             let root = FileManager.default.temporaryDirectory.appendingPathComponent("UITests-" + UUID().uuidString)
             let defaults = UserDefaults(suiteName: "siye.uitests." + UUID().uuidString)!
             let store = FolderSourceStore(userDefaults: defaults, indexStore: ExcalidrawJSONFileIndexStore(fileURL: root.appendingPathComponent("index.json")))
-            manager = DocumentManager(store: store)
+            manager = DocumentManager(store: store, draftDirectory: root.appendingPathComponent("drafts"))
             if fixture == "documents" || fixture == "browser" {
                 do {
                     let folder = root.appendingPathComponent("Test Documents")
                     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
                     // Seed both files before indexing to avoid racing an empty scan.
                     for (name, type) in [("Test Canvas", SiyeDocumentType.excalidraw), ("Test Mind Map", SiyeDocumentType.mindmap)] {
-                        let data = try JSONSerialization.data(withJSONObject: type.blankScene)
+                        var scene = type.blankScene
+                        if type == .mindmap, ProcessInfo.processInfo.environment["SIYE_UI_TEST_LARGE_MAP"] == "1" {
+                            func node(_ id: String, _ text: String, children: [[String: Any]] = []) -> [String: Any] {
+                                ["id": id, "content": ["type": "doc", "content": [["type": "paragraph", "content": [["type": "text", "text": text]]]]], "note": "", "expanded": true, "children": children]
+                            }
+                            let branches = (0..<20).map { branch in
+                                let leaves = (0..<(branch == 19 ? 48 : 49)).map { leaf in
+                                    node("leaf-\(branch)-\(leaf)", "验证节点 \(branch)-\(leaf)")
+                                }
+                                return node("branch-\(branch)", "验证分支 \(branch)", children: leaves)
+                            }
+                            scene["nodeData"] = node("root", "中心主题", children: branches)
+                        }
+                        let data = try JSONSerialization.data(withJSONObject: scene)
                         try data.write(to: folder.appendingPathComponent(name + type.fileExtension), options: .atomic)
                     }
                     if fixture == "browser" {
@@ -200,11 +214,8 @@ struct ContentView: View {
         guard documentManager.currentEntry == nil,
               let lastEntry = documentManager.mostRecentEntry() else { return }
         
-        do {
-            let scene = try documentManager.open(entry: lastEntry)
-            viewModel.loadScene(scene)
-            selectedEntryId = lastEntry.id
-        } catch {}
+        viewModel.open(entry: lastEntry)
+        selectedEntryId = lastEntry.id
     }
 }
 
@@ -539,7 +550,7 @@ struct FolderListView: View {
         .onAppear {
             rescanFolders()
         }
-        .onChange(of: documentManager.indexedEntries) { _, _ in
+        .onChange(of: documentManager.indexedEntries.map(\.fileURL)) { _, _ in
             rescanFolders()
         }
         .onChange(of: documentManager.activeFolderId) { _, _ in
@@ -607,13 +618,9 @@ struct FolderListView: View {
     }
     
     private func openEntry(_ entry: ExcalidrawFileEntry) {
-        do {
-            let scene = try documentManager.open(entry: entry)
-            viewModel.loadScene(scene)
-            selectedEntryId = entry.id
-            // 导航到编辑器
-            navigationPath.append(EditorDestination(entryId: entry.id))
-        } catch {}
+        viewModel.open(entry: entry)
+        selectedEntryId = entry.id
+        navigationPath.append(EditorDestination(entryId: entry.id))
     }
     
     private func deleteEntry(_ entry: ExcalidrawFileEntry) {
@@ -1427,13 +1434,9 @@ struct FileListView: View {
     }
     
     private func openEntry(_ entry: ExcalidrawFileEntry) {
-        do {
-            let scene = try documentManager.open(entry: entry)
-            viewModel.loadScene(scene)
-            selectedEntryId = entry.id
-            // 导航到编辑器
-            navigationPath.append(EditorDestination(entryId: entry.id))
-        } catch {}
+        viewModel.open(entry: entry)
+        selectedEntryId = entry.id
+        navigationPath.append(EditorDestination(entryId: entry.id))
     }
     
     private func countFilesInNode(_ node: FileTreeNode) -> Int {
@@ -1692,8 +1695,11 @@ struct EditorView: View {
                 .ignoresSafeArea()
                 .accessibilityIdentifier(viewModel.isCanvasReady ? "editor-ready" : "editor-loading")
             
-            if !viewModel.isCanvasReady {
+            if viewModel.isDocumentLoading || !viewModel.isCanvasReady {
                 LoadingView()
+            }
+            if let error = viewModel.documentLoadError {
+                Text(error).padding().background(.regularMaterial).clipShape(RoundedRectangle(cornerRadius: 12))
             }
         }
         .background(Color(uiColor: .systemBackground).ignoresSafeArea())
@@ -1732,9 +1738,10 @@ struct EditorView: View {
             
             ToolbarItem(placement: .topBarLeading) {
                 Button {
-                    // 直接弹出导航栈，返回上一层
-                    navigationPath.removeLast()
-                    DispatchQueue.main.async {
+                    viewModel.cancelOpening()
+                    viewModel.flushEditing { success in
+                        guard success else { viewModel.documentLoadError = "当前文档未能保存，请稍后重试"; return }
+                        if !navigationPath.isEmpty { navigationPath.removeLast() }
                         documentManager.clearCurrentEntry()
                         selectedEntryId = nil
                     }
@@ -1773,6 +1780,10 @@ struct EditorView: View {
                     }
                 }
             }
+        .onDisappear {
+            viewModel.cancelOpening()
+            viewModel.flushEditing { _ in }
+        }
     }
     
     private func commitRename() {
@@ -1782,15 +1793,11 @@ struct EditorView: View {
             return
         }
         
-        do {
-            try documentManager.renameCurrentEntry(to: newName)
-            if let entry = documentManager.currentEntry {
-                viewModel.updateDocId(entry.fileURL.path)
+        guard let entry = documentManager.currentEntry else { isEditingTitle = false; return }
+        documentManager.renameEntry(entry, to: newName) { result in
+            if case .success(let renamed) = result, documentManager.currentEntry?.id == entry.id {
+                viewModel.updateDocId(renamed.fileURL.path)
             }
-            isEditingTitle = false
-        } catch {
-            // 显示错误提示
-            print("重命名失败: \(error.localizedDescription)")
             isEditingTitle = false
         }
     }
@@ -2053,6 +2060,8 @@ private final class CanvasWebView: WKWebView, UIDocumentPickerDelegate, UIGestur
         evaluateJavaScript("window.siyeNativeKeyboardTop = \(top) * window.innerWidth; window.dispatchEvent(new Event('siye-native-keyboard'));", completionHandler: nil)
     }
 
+    deinit { NotificationCenter.default.removeObserver(self) }
+
     private func presentImagePicker() {
         guard var presenter = window?.rootViewController else { return }
         while let presented = presenter.presentedViewController { presenter = presented }
@@ -2074,13 +2083,18 @@ private final class CanvasWebView: WKWebView, UIDocumentPickerDelegate, UIGestur
     }
 
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-        guard let url = urls.first, let data = try? Data(contentsOf: url), data.count <= 10 * 1024 * 1024 else { return }
-        let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "image/png"
-        let payload = ["base64": data.base64EncodedString(), "name": url.lastPathComponent, "mime": mime]
-        guard let json = try? JSONSerialization.data(withJSONObject: payload), let value = String(data: json, encoding: .utf8) else { return }
+        guard let url = urls.first else { return }
         controller.dismiss(animated: true) { [weak self] in
             self?.resumeNodeEditing()
-            self?.evaluateJavaScript("window.dispatchEvent(new CustomEvent('siye-node-toolbar-image', {detail: \(value)}))", completionHandler: nil)
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let data = try? Data(contentsOf: url), data.count <= 10 * 1024 * 1024 else { return }
+                let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "image/png"
+                let payload = ["base64": data.base64EncodedString(), "name": url.lastPathComponent, "mime": mime]
+                guard let json = try? JSONSerialization.data(withJSONObject: payload), let value = String(data: json, encoding: .utf8) else { return }
+                DispatchQueue.main.async {
+                    self?.evaluateJavaScript("window.dispatchEvent(new CustomEvent('siye-node-toolbar-image', {detail: \(value)}))", completionHandler: nil)
+                }
+            }
         }
     }
 
@@ -2098,11 +2112,14 @@ private final class CanvasWebView: WKWebView, UIDocumentPickerDelegate, UIGestur
 
 final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate, WKScriptMessageHandler {
     @Published var isCanvasReady = false
+    @Published var isDocumentLoading = false
+    @Published var documentLoadError: String?
     @Published var hasUnsavedChanges = false
     let webView: WKWebView
 
     private var currentDocumentID: String?
     private var sceneGeneration = 0
+    private let bridgeQueue = DispatchQueue(label: "com.xexcalidraw.bridge", qos: .userInitiated)
     private let messageHandlerName = "bridge"
     private let aiEnabledKey = "aiEnabled"
     private var didSendInitialScene = false
@@ -2110,7 +2127,7 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
     private var didStartLoading = false
     private let documentManager: DocumentManager
     private let aiModule: AIModule
-    private let schemeHandler = BundleSchemeHandler()
+    private let schemeHandler = BundleResourceSchemeHandler()
     private var pendingScenePayload: [String: Any]?
 
     private var isAIEnabled: Bool {
@@ -2130,7 +2147,7 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
         contentController.addUserScript(WKUserScript(source: "window.siyeNativeKeyboardAccessory = true; window.siyeNativeKeyboardVisible = false;", injectionTime: .atDocumentStart, forMainFrameOnly: true))
         self.webView = CanvasWebView(frame: .zero, configuration: config)
         super.init()
-        contentController.add(self, name: messageHandlerName)
+        contentController.add(WeakScriptMessageHandler(self), name: messageHandlerName)
         webView.navigationDelegate = self
         NotificationCenter.default.addObserver(self, selector: #selector(flushOnBackground), name: UIApplication.willResignActiveNotification, object: nil)
         
@@ -2164,13 +2181,17 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard message.name == messageHandlerName,
-              let payloadString = message.body as? String,
-              let data = payloadString.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let type = json["type"] as? String,
-              let payload = json["payload"] as? [String: Any] else { return }
+        guard message.name == messageHandlerName, let payloadString = message.body as? String else { return }
+        bridgeQueue.async { [weak self] in
+            guard let data = payloadString.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let type = json["type"] as? String,
+                  let payload = json["payload"] as? [String: Any] else { return }
+            DispatchQueue.main.async { self?.handleMessage(type: type, payload: payload) }
+        }
+    }
 
+    private func handleMessage(type: String, payload: [String: Any]) {
         if type == "saveScene" {
             handleSave(payload: payload)
         } else if type == "openLink" {
@@ -2180,7 +2201,9 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
         } else if type == "saveAttachment" {
             handleSaveAttachment(payload: payload)
         } else if type == "didChange" {
-            hasUnsavedChanges = payload["dirty"] as? Bool ?? true
+            guard payload["docId"] as? String == currentDocumentID else { return }
+            let dirty = payload["dirty"] as? Bool ?? true
+            if hasUnsavedChanges != dirty { hasUnsavedChanges = dirty }
         } else if type == "webReady" {
             isCanvasReady = true
             isBridgeReady = true
@@ -2222,18 +2245,11 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
             send(type: "saveResult", payload: ["requestId": requestId, "success": false, "error": "保存数据不完整"])
             return
         }
-        let scene: Any
-        if let text = raw as? String, let data = text.data(using: .utf8), let parsed = try? JSONSerialization.jsonObject(with: data) { scene = parsed } else { scene = raw }
-        guard JSONSerialization.isValidJSONObject(scene) else {
-            send(type: "saveResult", payload: ["requestId": requestId, "success": false, "error": "文档格式无效"])
-            return
-        }
-        documentManager.saveScene(docId: docId, sceneJson: scene) { [weak self] result in
+        documentManager.saveScene(docId: docId, sceneJson: raw) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self else { return }
                 switch result {
                 case .success:
-                    if self.currentDocumentID == docId { self.hasUnsavedChanges = false }
                     self.send(type: "saveResult", payload: ["requestId": requestId, "docId": docId, "success": true])
                 case .failure(let error):
                     self.send(type: "saveResult", payload: ["requestId": requestId, "docId": docId, "success": false, "error": error.localizedDescription])
@@ -2269,14 +2285,14 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
               let docId = payload["docId"] as? String else { return }
         guard let mimeType = payload["mimeType"] as? String,
               let encoded = payload["dataBase64"] as? String,
-              let imageData = Data(base64Encoded: encoded),
-              imageData.count <= 10 * 1024 * 1024,
+              encoded.utf8.count <= 14 * 1024 * 1024,
               let context = documentManager.attachmentContext(docId: docId) else {
             send(type: "attachmentSaveFailed", payload: ["requestId": requestId, "error": "无法保存图片附件"])
             return
         }
         DispatchQueue.global(qos: .utility).async { [weak self] in
             do {
+                guard let imageData = Data(base64Encoded: encoded), imageData.count <= 10 * 1024 * 1024 else { throw MindMapAttachmentError.unsupportedImage }
                 let relativePath = try MindMapAttachmentStore.save(
                     imageData: imageData,
                     mimeType: mimeType,
@@ -2308,6 +2324,41 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
         }
     }
 
+    func open(entry: ExcalidrawFileEntry) {
+        sceneGeneration += 1
+        let generation = sceneGeneration
+        isDocumentLoading = true
+        documentLoadError = nil
+        flushEditing { [weak self] success in
+            guard let self, self.sceneGeneration == generation else { return }
+            guard success else {
+                self.isDocumentLoading = false
+                self.documentLoadError = "当前文档未能保存，请稍后重试"
+                return
+            }
+            self.documentManager.read(entry: entry) { [weak self] result in
+                guard let self, self.sceneGeneration == generation else { return }
+                self.isDocumentLoading = false
+                switch result {
+                case .success(let scene):
+                    self.documentManager.activate(entry: entry)
+                    self.loadScene(scene)
+                case .failure(let error):
+                    self.documentLoadError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    func cancelOpening() {
+        sceneGeneration += 1
+        isDocumentLoading = false
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
     func loadScene(_ scene: DocumentScene) {
         let payload: [String: Any] = [
             "docId": scene.docId,
@@ -2330,13 +2381,9 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
     }
 
     private func loadInitialScene() {
+        guard !isDocumentLoading, pendingScenePayload == nil, currentDocumentID == nil else { return }
         if let entry = documentManager.mostRecentEntry() {
-            do {
-                let scene = try documentManager.open(entry: entry)
-                loadScene(scene)
-            } catch {
-                createBlankScene()
-            }
+            if !isDocumentLoading && pendingScenePayload == nil { open(entry: entry) }
             return
         }
         createBlankScene()
@@ -2411,15 +2458,13 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
             let context = documentManager.attachmentContext(docId: docId)
             schemeHandler.setAttachmentContext(documentURL: context?.documentURL, repositoryURL: context?.repositoryURL)
         }
-        let envelope: [String: Any] = [
-            "version": "1.0",
-            "type": type,
-            "payload": payload
-        ]
-        guard let data = try? JSONSerialization.data(withJSONObject: envelope),
-              let jsonString = String(data: data, encoding: .utf8) else { return }
-        let js = "window.bridgeDispatch && window.bridgeDispatch(\(jsonString.debugDescription))"
-        webView.evaluateJavaScript(js, completionHandler: nil)
+        bridgeQueue.async { [weak self] in
+            let envelope: [String: Any] = ["version": "1.0", "type": type, "payload": payload]
+            guard let data = try? JSONSerialization.data(withJSONObject: envelope),
+                  let jsonString = String(data: data, encoding: .utf8) else { return }
+            let js = "window.bridgeDispatch && window.bridgeDispatch(\(jsonString.debugDescription))"
+            DispatchQueue.main.async { self?.webView.evaluateJavaScript(js, completionHandler: nil) }
+        }
     }
 
     private func sendAIConfig() {
@@ -2451,93 +2496,6 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
 
 // MARK: - Bundle Scheme Handler
 
-final class BundleSchemeHandler: NSObject, WKURLSchemeHandler {
-    private let attachmentLock = NSLock()
-    private var attachmentDocumentURL: URL?
-    private var attachmentRepositoryURL: URL?
-
-    func setAttachmentContext(documentURL: URL?, repositoryURL: URL?) {
-        attachmentLock.lock()
-        attachmentDocumentURL = documentURL
-        attachmentRepositoryURL = repositoryURL
-        attachmentLock.unlock()
-    }
-
-    func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
-        guard let url = urlSchemeTask.request.url else {
-            urlSchemeTask.didFailWithError(NSError(domain: "BundleSchemeHandler", code: 1))
-            return
-        }
-        var resourcePath = url.host ?? ""
-        resourcePath += url.path
-        if resourcePath.hasPrefix("/") { resourcePath.removeFirst() }
-        if resourcePath.isEmpty { resourcePath = "index.html" }
-        if resourcePath == "mindmap-attachment" {
-            let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-            let docId = query.first(where: { $0.name == "docId" })?.value
-            let path = query.first(where: { $0.name == "path" })?.value
-            attachmentLock.lock()
-            let documentURL = attachmentDocumentURL
-            let repositoryURL = attachmentRepositoryURL
-            attachmentLock.unlock()
-            guard let docId, let path, let documentURL, let repositoryURL,
-                  docId == documentURL.path,
-                  let fileURL = MindMapAttachmentStore.resolve(
-                    relativePath: path,
-                    documentURL: documentURL,
-                    repositoryURL: repositoryURL
-                  ),
-                  let data = try? Data(contentsOf: fileURL) else {
-                urlSchemeTask.didFailWithError(NSError(domain: "BundleSchemeHandler", code: 3))
-                return
-            }
-            let response = URLResponse(
-                url: url,
-                mimeType: mimeType(for: fileURL.pathExtension),
-                expectedContentLength: data.count,
-                textEncodingName: nil
-            )
-            urlSchemeTask.didReceive(response)
-            urlSchemeTask.didReceive(data)
-            urlSchemeTask.didFinish()
-            return
-        }
-        
-        guard let baseURL = Bundle.main.resourceURL,
-              let data = try? Data(contentsOf: baseURL.appendingPathComponent(resourcePath)) else {
-            urlSchemeTask.didFailWithError(NSError(domain: "BundleSchemeHandler", code: 2))
-            return
-        }
-        
-        let mimeType = mimeType(for: (resourcePath as NSString).pathExtension)
-        let response = URLResponse(
-            url: url,
-            mimeType: mimeType,
-            expectedContentLength: data.count,
-            textEncodingName: mimeType.hasPrefix("text/") ? "utf-8" : nil
-        )
-        urlSchemeTask.didReceive(response)
-        urlSchemeTask.didReceive(data)
-        urlSchemeTask.didFinish()
-    }
-
-    func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {}
-
-    private func mimeType(for ext: String) -> String {
-        switch ext.lowercased() {
-        case "html": return "text/html"
-        case "js": return "application/javascript"
-        case "css": return "text/css"
-        case "svg": return "image/svg+xml"
-        case "png": return "image/png"
-        case "jpg", "jpeg": return "image/jpeg"
-        case "gif": return "image/gif"
-        case "webp": return "image/webp"
-        case "json": return "application/json"
-        default: return "application/octet-stream"
-        }
-    }
-}
 
 #else
 import SwiftUI

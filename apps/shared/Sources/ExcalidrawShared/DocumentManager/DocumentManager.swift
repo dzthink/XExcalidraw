@@ -58,15 +58,16 @@ public final class DocumentManager: ObservableObject {
 
     private let store: FolderSourceStore
     private let saveQueue: DispatchQueue
-    // Accessed only on saveQueue, including rename operations.
+    // Mutated on saveQueue; UI reads use renameLock.
     private var renamedDocumentURLs: [String: URL] = [:]
+    private let renameLock = NSLock()
     private var cancellables: Set<AnyCancellable> = []
     private let draftDirectory: URL
 
-    public init(store: FolderSourceStore = FolderSourceStore()) {
+    public init(store: FolderSourceStore = FolderSourceStore(), draftDirectory: URL? = nil) {
         self.store = store
         self.saveQueue = DispatchQueue(label: "com.xexcalidraw.document-manager.save", qos: .utility)
-        self.draftDirectory = DocumentManager.makeDraftDirectory()
+        self.draftDirectory = draftDirectory ?? DocumentManager.makeDraftDirectory()
 
         store.$sources
             .receive(on: DispatchQueue.main)
@@ -109,6 +110,7 @@ public final class DocumentManager: ObservableObject {
     }
 
     public func refreshIndexes() {
+        guard !sources.isEmpty else { indexStatus = .idle; return }
         indexStatus = .refreshing
         store.refreshAllIndexes()
     }
@@ -193,19 +195,31 @@ public final class DocumentManager: ObservableObject {
 
     public func saveScene(
         docId: String,
-        sceneJson: Any,
+        sceneJson rawScene: Any,
         completion: @escaping (Result<ExcalidrawFileEntry, Error>) -> Void
     ) {
+        let submittedEntryID = currentEntry?.id
+        let submittedURL = currentEntry?.fileURL
+        let fallbackFolderURL = defaultFolderURL()
         saveQueue.async { [weak self] in
             guard let self else { return }
             do {
+                let sceneJson: Any
+                if let text = rawScene as? String {
+                    sceneJson = try JSONSerialization.jsonObject(with: Data(text.utf8))
+                } else {
+                    sceneJson = rawScene
+                }
+                guard JSONSerialization.isValidJSONObject(sceneJson) else { throw DocumentManagerError.invalidImportData }
                 self.writeDraft(docId: docId, sceneJson: sceneJson)
-                let targetURL = try self.resolveSaveURL(docId: docId)
+                let targetURL = try self.resolveSaveURL(docId: docId, currentURL: submittedURL, fallbackFolderURL: fallbackFolderURL)
                 let jsonData = try JSONSerialization.data(withJSONObject: sceneJson, options: [.prettyPrinted])
                 try jsonData.write(to: targetURL, options: [.atomic])
+                self.removeDraftFile(for: docId)
+                let values = try? targetURL.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
                 DispatchQueue.main.async {
-                    self.clearDraft(docId: docId)
-                    let entry = self.updateIndexAfterSave(fileURL: targetURL)
+                    if self.pendingDraft?.docId == docId { self.pendingDraft = nil }
+                    let entry = self.updateIndexAfterSave(fileURL: targetURL, modifiedAt: values?.contentModificationDate, fileSize: values?.fileSize, activate: self.currentEntry?.id == submittedEntryID)
                     if let entry {
                         completion(.success(entry))
                     } else {
@@ -226,28 +240,15 @@ public final class DocumentManager: ObservableObject {
         type: SiyeDocumentType = .excalidraw,
         completion: @escaping (Result<DocumentScene, Error>) -> Void
     ) {
+        let target: (FolderSource, URL)? = {
+            if let folderId, let source = sources.first(where: { $0.id == folderId }), let url = store.resolveURL(for: source) {
+                return (source, url)
+            }
+            return defaultFolderSource()
+        }()
+        guard let (targetSource, targetFolderURL) = target else { completion(.failure(DocumentManagerError.missingFolder)); return }
         saveQueue.async { [weak self] in
             guard let self else { return }
-            
-            // 确定目标文件夹
-            let targetSource: FolderSource
-            let targetFolderURL: URL
-            
-            if let folderId = folderId,
-               let source = self.sources.first(where: { $0.id == folderId }),
-               let url = self.store.resolveURL(for: source) {
-                targetSource = source
-                targetFolderURL = url
-            } else if let (source, url) = self.defaultFolderSource() {
-                targetSource = source
-                targetFolderURL = url
-            } else {
-                DispatchQueue.main.async {
-                    completion(.failure(DocumentManagerError.missingFolder))
-                }
-                return
-            }
-            
             let destinationURL = relativeFolderPath.isEmpty
                 ? targetFolderURL
                 : targetFolderURL.appendingPathComponent(relativeFolderPath, isDirectory: true)
@@ -256,18 +257,12 @@ public final class DocumentManager: ObservableObject {
             do {
                 let jsonData = try JSONSerialization.data(withJSONObject: sceneJson, options: [.prettyPrinted])
                 try jsonData.write(to: fileURL, options: [.atomic])
-                guard let entry = self.store.upsertEntry(
-                    for: fileURL,
-                    folderId: targetSource.id,
-                    rootURL: targetFolderURL,
-                    lastOpenedAt: Date()
-                ) else {
-                    DispatchQueue.main.async {
-                        completion(.failure(DocumentManagerError.unindexedFile))
-                    }
-                    return
-                }
+                let values = try? fileURL.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey])
                 DispatchQueue.main.async {
+                    guard let entry = self.store.upsertEntry(for: fileURL, folderId: targetSource.id, rootURL: targetFolderURL, lastOpenedAt: Date(), resourceValues: values) else {
+                        completion(.failure(DocumentManagerError.unindexedFile))
+                        return
+                    }
                     self.currentEntry = entry
                     self.activeFolderId = targetSource.id
                     completion(.success(DocumentScene(
@@ -309,27 +304,47 @@ public final class DocumentManager: ObservableObject {
     }
 
     public func renameEntry(_ entry: ExcalidrawFileEntry, to newName: String) throws {
+        let newURL = try saveQueue.sync { try moveEntry(entry, to: newName) }
+        finishRename(entry, newURL: newURL)
+    }
+
+    public func renameEntry(_ entry: ExcalidrawFileEntry, to newName: String, completion: @escaping (Result<ExcalidrawFileEntry, Error>) -> Void) {
+        saveQueue.async { [weak self] in
+            guard let self else { return }
+            let result = Result { try self.moveEntry(entry, to: newName) }
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let newURL):
+                    self.finishRename(entry, newURL: newURL)
+                    completion(.success(self.store.indexedEntries.first(where: { $0.id == entry.id }) ?? entry))
+                case .failure(let error):
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
+    private func moveEntry(_ entry: ExcalidrawFileEntry, to newName: String) throws -> URL {
         let suffix = entry.fileName.lowercased().hasSuffix(".excalidraw.json") ? ".excalidraw.json" : (SiyeDocumentType(fileName: entry.fileName)?.fileExtension ?? ".excalidraw")
         let sanitizedName = "\(SiyeDocumentType.displayName(from: newName))\(suffix)"
-        let directory = entry.fileURL.deletingLastPathComponent()
-        let newURL = directory.appendingPathComponent(sanitizedName)
-        
-        // Check if file already exists
-        if FileManager.default.fileExists(atPath: newURL.path) && newURL != entry.fileURL {
-            throw DocumentManagerError.fileAlreadyExists
+        let oldURL = renamedURL(for: entry.fileURL.path) ?? entry.fileURL
+        let newURL = oldURL.deletingLastPathComponent().appendingPathComponent(sanitizedName)
+        guard newURL != oldURL else { return newURL }
+        if FileManager.default.fileExists(atPath: newURL.path) { throw DocumentManagerError.fileAlreadyExists }
+        try FileManager.default.moveItem(at: oldURL, to: newURL)
+        renameLock.lock()
+        defer { renameLock.unlock() }
+        for oldPath in Array(renamedDocumentURLs.keys) where renamedDocumentURLs[oldPath] == oldURL {
+            renamedDocumentURLs[oldPath] = newURL
         }
-        
-        guard newURL != entry.fileURL else { return }
+        renamedDocumentURLs[oldURL.path] = newURL
+        return newURL
+    }
 
-        // Drain pending writes before moving, and redirect late bridge saves afterward.
-        try saveQueue.sync {
-            try FileManager.default.moveItem(at: entry.fileURL, to: newURL)
-            for oldPath in Array(renamedDocumentURLs.keys) where renamedDocumentURLs[oldPath] == entry.fileURL {
-                renamedDocumentURLs[oldPath] = newURL
-            }
-            renamedDocumentURLs[entry.fileURL.path] = newURL
-        }
-        store.updateEntryAfterRename(id: entry.id, newFileURL: newURL, newFileName: sanitizedName)
+    private func finishRename(_ entry: ExcalidrawFileEntry, newURL: URL) {
+        // Another queued rename may already have moved the same file again.
+        let latestURL = renamedURL(for: newURL.path) ?? newURL
+        store.updateEntryAfterRename(id: entry.id, newFileURL: latestURL, newFileName: latestURL.lastPathComponent)
         if currentEntry?.id == entry.id,
            let updated = store.indexedEntries.first(where: { $0.id == entry.id }) {
             currentEntry = updated
@@ -337,22 +352,15 @@ public final class DocumentManager: ObservableObject {
     }
 
     private func resolveSaveURL(docId: String) throws -> URL {
-        if let renamedURL = renamedDocumentURLs[docId] {
-            return renamedURL
-        }
-        if let currentEntry, docId == currentEntry.fileURL.path {
-            return currentEntry.fileURL
-        }
+        try resolveSaveURL(docId: docId, currentURL: currentEntry?.fileURL, fallbackFolderURL: defaultFolderURL())
+    }
 
+    private func resolveSaveURL(docId: String, currentURL: URL?, fallbackFolderURL: URL?) throws -> URL {
+        if let renamedURL = renamedURL(for: docId) { return renamedURL }
+        if let currentURL, docId == currentURL.path { return currentURL }
         let potentialURL = URL(fileURLWithPath: docId)
-        if FileManager.default.fileExists(atPath: potentialURL.path) {
-            return potentialURL
-        }
-
-        guard let folderURL = defaultFolderURL() else {
-            throw DocumentManagerError.missingFolder
-        }
-
+        if FileManager.default.fileExists(atPath: potentialURL.path) { return potentialURL }
+        guard let folderURL = fallbackFolderURL else { throw DocumentManagerError.missingFolder }
         let fileName = SiyeDocumentType(fileName: docId) != nil ? docId : "\(docId).excalidraw"
         return folderURL.appendingPathComponent(fileName)
     }
@@ -374,10 +382,16 @@ public final class DocumentManager: ObservableObject {
         return (source, url)
     }
 
-    private func updateIndexAfterSave(fileURL: URL) -> ExcalidrawFileEntry? {
-        let fileURL = saveQueue.sync { renamedDocumentURLs[fileURL.path] ?? fileURL }
-        if let updated = store.updateEntryAfterSave(for: fileURL) {
-            currentEntry = updated
+    private func renamedURL(for path: String) -> URL? {
+        renameLock.lock()
+        defer { renameLock.unlock() }
+        return renamedDocumentURLs[path]
+    }
+
+    private func updateIndexAfterSave(fileURL: URL, modifiedAt: Date? = nil, fileSize: Int? = nil, activate: Bool = true) -> ExcalidrawFileEntry? {
+        let fileURL = renamedURL(for: fileURL.path) ?? fileURL
+        if let updated = store.updateEntryAfterSave(for: fileURL, modifiedAt: modifiedAt, fileSize: fileSize) {
+            if activate { currentEntry = updated }
             return updated
         }
 
@@ -386,8 +400,7 @@ public final class DocumentManager: ObservableObject {
         }
 
         let entry = store.upsertEntry(for: fileURL, folderId: source.id, rootURL: rootURL, lastOpenedAt: Date())
-        currentEntry = entry
-        activeFolderId = source.id
+        if activate { currentEntry = entry; activeFolderId = source.id }
         return entry
     }
 
@@ -445,15 +458,6 @@ public final class DocumentManager: ObservableObject {
             // This prevents the alert from showing during normal save operations
         } catch {
             return
-        }
-    }
-
-    private func clearDraft(docId: String) {
-        removeDraftFile(for: docId)
-        DispatchQueue.main.async {
-            if self.pendingDraft?.docId == docId {
-                self.pendingDraft = nil
-            }
         }
     }
 

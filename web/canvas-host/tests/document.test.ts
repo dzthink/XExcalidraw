@@ -167,3 +167,83 @@ test("dash creation and nested conversion preserve parent style", () => {
   assert.equal(state.doc.firstChild!.attrs.marker, "bullet");
   assert.equal(state.doc.firstChild!.firstChild!.child(1).attrs.marker, "dash");
 });
+
+test("node-local history groups input and restores edits across deletion and structural undo", () => {
+  const { doc, a, b } = fixture(), store = new DocumentStore(doc);
+  const sibling = store.node(b.id)!;
+  store.cursor = { id: a.id, from: 2, to: 2, field: "content" };
+  store.changeContent(a.id, plainContent("edited"));
+  store.changeContent(a.id, plainContent("edited twice"));
+  assert.equal(store.node(b.id), sibling);
+  assert.equal(store.structureRevision, 0);
+  store.change(d => { structure(d.nodeData, [a.id], "delete"); });
+  assert.equal(store.node(a.id), null);
+  assert.equal(store.undo(), true);
+  assert.equal(readContent(store.node(a.id)!.content).textContent, "edited twice");
+  assert.equal(store.undo(), true);
+  assert.equal(readContent(store.node(a.id)!.content).textContent, "A");
+  assert.equal(store.redo(), true);
+  assert.equal(readContent(store.node(a.id)!.content).textContent, "edited twice");
+  assert.equal(store.redo(), true);
+  assert.equal(store.node(a.id), null);
+});
+
+test("node-local no-op preserves redo and content history does not absorb a structure change", () => {
+  const { doc, a } = fixture(), store = new DocumentStore(doc);
+  store.changeContent(a.id, plainContent("changed"), "shared");
+  store.change(d => { d.nodeData.children.push(newNode("new")); }, "shared");
+  assert.equal(store.undo(), true);
+  assert.equal(store.document.nodeData.children.length, 2);
+  assert.equal(store.undo(), true);
+  assert.equal(store.changeContent(a.id, plainContent("A")), false);
+  assert.equal(store.redo(), true);
+  assert.equal(readContent(store.node(a.id)!.content).textContent, "changed");
+  store.boundary(); store.changeContent(a.id, plainContent("replacement"));
+  assert.equal(store.redo(), false);
+});
+
+import { initializeBridge, addBridgeListener } from "../src/bridge";
+test("bridge setup shares one dispatcher and releases it only after the last consumer", () => {
+  const oldWindow = (globalThis as unknown as { window?: unknown }).window;
+  const browser = Object.assign(new EventTarget(), { webkit: { messageHandlers: { bridge: { postMessage() {} } } }, matchMedia: () => ({ matches: false }), bridgeDispatch: undefined as ((data: string) => void) | undefined });
+  (globalThis as unknown as { window: unknown }).window = browser;
+  let deliveries = 0;
+  const unlisten = addBridgeListener(() => deliveries++);
+  const first = initializeBridge(), second = initializeBridge();
+  const message = JSON.stringify({ version: "1.0", type: "webReady", payload: {} });
+  try {
+    browser.dispatchEvent(new MessageEvent("message", { data: message }));
+    assert.equal(deliveries, 1);
+    first(); first();
+    browser.bridgeDispatch!(message);
+    assert.equal(deliveries, 2);
+    second();
+    assert.equal(browser.bridgeDispatch, undefined);
+    browser.dispatchEvent(new MessageEvent("message", { data: message }));
+    assert.equal(deliveries, 2);
+  } finally {
+    first(); second(); unlisten();
+    if (oldWindow === undefined) delete (globalThis as unknown as { window?: unknown }).window;
+    else (globalThis as unknown as { window: unknown }).window = oldWindow;
+  }
+});
+
+test("node lookup follows an identical structural replacement before subsequent input", () => {
+  const { doc, a } = fixture(), store = new DocumentStore(doc);
+  const previous = store.node(a.id);
+  assert.equal(store.change(document => { document.nodeData = JSON.parse(JSON.stringify(document.nodeData)); }), false);
+  assert.notEqual(store.node(a.id), previous);
+  assert.equal(store.changeContent(a.id, plainContent("updated")), true);
+  assert.equal(readContent(findNode(store.document.nodeData, a.id)!.content).textContent, "updated");
+});
+
+test("large node history drops old groups while retaining recent undo and redo", () => {
+  const doc = newDocument(), store = new DocumentStore(doc), id = doc.nodeData.id;
+  const text = "字".repeat(500000);
+  for (let index = 0; index < 24; index++) store.changeContent(id, plainContent(text + index), `group-${index}`);
+  let count = 0;
+  while (store.undo()) count++;
+  assert.ok(count > 0 && count < 24, "Large snapshots must stay within the history budget");
+  for (let index = 0; index < count; index++) assert.equal(store.redo(), true);
+  assert.equal(readContent(store.node(id)!.content).textContent, text + 23);
+});

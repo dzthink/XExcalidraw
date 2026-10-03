@@ -1,0 +1,14 @@
+{
+  "checks" : [
+    "Outline single editor, pointer activation, rich content and confirmed save",
+    "Outline undo\/redo retains the active editor and formatting",
+    "Input during in-flight save waits for the newest revision acknowledgement",
+    "View switch preserves rich content and replaces editor portals safely",
+    "Trusted mouse hit testing, empty-canvas box selection and panning",
+    "Root and descendant resize paths match a full rebuild (side)",
+    "Root and descendant resize paths match a full rebuild (left)",
+    "Root and descendant resize paths match a full rebuild (right)",
+    "Root and descendant resize paths match a full rebuild (down)",
+    "Read-only outline mounts no editable instances"
+  ]
+}

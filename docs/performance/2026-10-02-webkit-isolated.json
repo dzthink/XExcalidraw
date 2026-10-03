@@ -1,0 +1,71 @@
+{
+  "results" : [
+    {
+      "mode" : "outline",
+      "mount_to_two_raf_ms" : 67,
+      "mounted_editors" : 100,
+      "nodes" : 100,
+      "raf_interval_p95_ms" : 17,
+      "transaction_with_react_commit_p50_ms" : 2,
+      "transaction_with_react_commit_p95_ms" : 3
+    },
+    {
+      "all_node_lookups_p95_ms" : 1,
+      "full_link_div_p95_ms" : 4,
+      "mode" : "map",
+      "mount_to_two_raf_ms" : 60,
+      "mounted_editors" : 1,
+      "nodes" : 100,
+      "raf_interval_p95_ms" : 18,
+      "transaction_with_react_commit_p50_ms" : 2,
+      "transaction_with_react_commit_p95_ms" : 2
+    },
+    {
+      "mode" : "outline",
+      "mount_to_two_raf_ms" : 99,
+      "mounted_editors" : 500,
+      "nodes" : 500,
+      "raf_interval_p95_ms" : 18,
+      "transaction_with_react_commit_p50_ms" : 4,
+      "transaction_with_react_commit_p95_ms" : 5
+    },
+    {
+      "all_node_lookups_p95_ms" : 5,
+      "full_link_div_p95_ms" : 45.000000000000909,
+      "mode" : "map",
+      "mount_to_two_raf_ms" : 219,
+      "mounted_editors" : 1,
+      "nodes" : 500,
+      "raf_interval_p95_ms" : 33,
+      "transaction_with_react_commit_p50_ms" : 7,
+      "transaction_with_react_commit_p95_ms" : 7
+    },
+    {
+      "mode" : "outline",
+      "mount_to_two_raf_ms" : 160,
+      "mounted_editors" : 1000,
+      "nodes" : 1000,
+      "raf_interval_p95_ms" : 18,
+      "transaction_with_react_commit_p50_ms" : 6,
+      "transaction_with_react_commit_p95_ms" : 7
+    },
+    {
+      "all_node_lookups_p95_ms" : 17,
+      "full_link_div_p95_ms" : 159.00000000000182,
+      "mode" : "map",
+      "mount_to_two_raf_ms" : 644,
+      "mounted_editors" : 1,
+      "nodes" : 1000,
+      "raf_interval_p95_ms" : 104,
+      "transaction_with_react_commit_p50_ms" : 20,
+      "transaction_with_react_commit_p95_ms" : 21
+    }
+  ],
+  "samples" : 30,
+  "userAgent" : "Mozilla\/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit\/605.1.15 (KHTML, like Gecko)",
+  "viewport" : [
+    1280,
+    900
+  ],
+  "warmup" : 5
+}

@@ -40,6 +40,7 @@ export type DidChangePayload = {
 export type SaveScenePayload = {
   docId: string;
   sceneJson: Record<string, unknown> | string;
+  requestId?: string;
 };
 
 export type RequestAIPayload = {

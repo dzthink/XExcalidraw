@@ -43,6 +43,26 @@ body,
   display: none !important;
 }
 
+/* Dock desktop drawing tools to the top edge of the editor. */
+@media (hover: hover) and (pointer: fine) {
+  .excalidraw:not(.excalidraw--mobile) .FixedSideContainer_side_top {
+    top: 0;
+  }
+
+  .excalidraw:not(.excalidraw--mobile) .App-toolbar {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+  }
+
+  .excalidraw:not(.excalidraw--mobile) .App-menu_top > .Stack {
+    padding-top: var(--editor-container-padding);
+  }
+
+  .excalidraw:not(.excalidraw--mobile) .layer-ui__wrapper__top-right {
+    padding-top: 4px;
+  }
+}
+
 .mindmap-node-menu-backdrop { position: fixed; inset: 0; z-index: 1000; }
 .mindmap-node-menu { position: fixed; width: 184px; max-height: calc(100dvh - 16px); overflow-y: auto; padding: 4px; background: var(--bg, #fff); color: var(--text, #222); border: 1px solid #8886; border-radius: 12px; box-shadow: 0 8px 28px #0003; }
 .mindmap-node-menu button { display: block; width: 100%; min-height: 36px; border: 0; background: transparent; color: inherit; text-align: left; padding: 8px 12px; }

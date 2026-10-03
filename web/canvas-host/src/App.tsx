@@ -92,6 +92,13 @@ export default function App() {
   });
   const [fontsReady, setFontsReady] = useState(false);
   const saveTimeout = useRef<number | null>(null);
+  const currentLoad = useRef(loadState);
+  currentLoad.current = loadState;
+  const loadGeneration = useRef(0);
+  const revision = useRef(0);
+  const savedRevision = useRef(0);
+  const saveFlight = useRef<Promise<boolean> | null>(null);
+  const saveRequests = useRef(new Map<string, (okay: boolean) => void>());
   const didSendReady = useRef(false);
   const isApplyingScene = useRef(false);
 
@@ -127,38 +134,43 @@ export default function App() {
     } as unknown as Parameters<ExcalidrawImperativeAPI["updateScene"]>[0];
   }, [coerceSceneJson]);
 
-  const scheduleSave = useCallback(
-    (docId: string) => {
-      if (saveTimeout.current) {
-        window.clearTimeout(saveTimeout.current);
-      }
-      saveTimeout.current = window.setTimeout(() => {
-        const api = excalidrawApi.current;
-        if (!api) {
-          return;
-        }
-        const elements = api.getSceneElements();
-        const appState = api.getAppState();
-        const files = api.getFiles();
-        let sceneJson: string;
-        try {
-          sceneJson = serializeAsJSON(elements, appState, files, "local");
-        } catch {
-          return;
-        }
-        // Only save if the docId still matches the current document
-        if (docId !== loadState.docId) {
-          return;
-        }
-        const payload: SaveScenePayload = {
-          docId,
-          sceneJson
-        };
-        sendToNative(sendEnvelope("saveScene", payload));
-      }, SAVE_DEBOUNCE_MS);
-    },
-    [loadState.docId]
-  );
+  const flushExcalidraw = useCallback(async function flush(): Promise<boolean> {
+    if (saveTimeout.current !== null) { clearTimeout(saveTimeout.current); saveTimeout.current = null; }
+    const state = currentLoad.current;
+    if (state.readOnly || savedRevision.current === revision.current) return true;
+    if (saveFlight.current) { return await saveFlight.current ? flush() : false; }
+    const api = excalidrawApi.current;
+    if (!api) return false;
+    const atRevision = revision.current, generation = loadGeneration.current, requestId = crypto.randomUUID();
+    let sceneJson: string;
+    try { sceneJson = serializeAsJSON(api.getSceneElements(), api.getAppState(), api.getFiles(), "local"); }
+    catch { return false; }
+    const task = new Promise<boolean>(resolve => {
+      const timeout = window.setTimeout(() => finish(false), 10000);
+      const finish = (okay: boolean) => {
+        clearTimeout(timeout); saveRequests.current.delete(requestId);
+        if (okay && generation === loadGeneration.current) savedRevision.current = atRevision;
+        resolve(okay);
+      };
+      saveRequests.current.set(requestId, finish);
+      const payload: SaveScenePayload = { docId: state.docId, sceneJson, requestId };
+      sendToNative(sendEnvelope("saveScene", payload));
+    });
+    saveFlight.current = task;
+    const okay = await task;
+    saveFlight.current = null;
+    if (!okay || generation !== loadGeneration.current) return false;
+    if (revision.current !== atRevision) return flush();
+    sendToNative(sendEnvelope("didChange", { docId: currentLoad.current.docId, dirty: false }));
+    return true;
+  }, []);
+
+  const scheduleSave = useCallback((docId: string) => {
+    if (savedRevision.current === revision.current) sendToNative(sendEnvelope("didChange", { docId, dirty: true }));
+    revision.current++;
+    if (saveTimeout.current !== null) clearTimeout(saveTimeout.current);
+    saveTimeout.current = window.setTimeout(() => { void flushExcalidraw(); }, SAVE_DEBOUNCE_MS);
+  }, [flushExcalidraw]);
 
   const handleExcalidrawAPI = useCallback(
     (api: ExcalidrawImperativeAPI | null) => {
@@ -198,7 +210,13 @@ export default function App() {
 
   const handleBridgeMessage = useCallback(
     async (message: { type: string; payload: unknown }) => {
+      if (message.type === "saveResult") {
+        const result = message.payload as { requestId?: string; success?: boolean };
+        if (result.requestId) saveRequests.current.get(result.requestId)?.(result.success === true);
+        return;
+      }
       if (message.type === "loadScene") {
+        loadGeneration.current++; revision.current = 0; savedRevision.current = 0;
         const payload = message.payload as LoadScenePayload;
         setSceneLoadKey(value => value + 1);
         setLoadState({
@@ -314,14 +332,28 @@ export default function App() {
   );
 
   useEffect(() => {
-    initializeBridge();
+    const releaseBridge = initializeBridge();
     const unsubscribe = addBridgeListener((message) => {
       handleBridgeMessage(message);
     });
     return () => {
-      unsubscribe();
+      unsubscribe(); releaseBridge();
+      for (const finish of saveRequests.current.values()) finish(false);
+      saveRequests.current.clear();
     };
   }, [handleBridgeMessage]);
+
+  useEffect(() => {
+    if (loadState.docId.toLowerCase().endsWith(".mindmap")) return;
+    window.siyeFlush = flushExcalidraw;
+    const leave = () => { void flushExcalidraw(); };
+    window.addEventListener("pagehide", leave);
+    return () => {
+      window.removeEventListener("pagehide", leave);
+      if (window.siyeFlush === flushExcalidraw) delete window.siyeFlush;
+      if (saveTimeout.current !== null) clearTimeout(saveTimeout.current);
+    };
+  }, [loadState.docId, flushExcalidraw]);
 
   useEffect(() => {
     let didCancel = false;
@@ -347,32 +379,22 @@ export default function App() {
     };
   }, []);
 
-  // Apply scene when docId changes (new document loaded)
+  // Load a new scene once; renaming keeps the live drawing and its pending edits.
   useEffect(() => {
     if (!isApiReady || !loadState.docId || loadState.docId.toLowerCase().endsWith(".mindmap")) {
       return;
     }
-    // Always apply scene when docId changes to ensure content is loaded
     applyScene(loadState.docId, loadState.sceneJson);
     // Reset the ready flag to allow sending ready message for new document
     didSendReady.current = false;
-  }, [applyScene, isApiReady, loadState.docId]);
-
-  // Separate effect for sceneJson changes (e.g., from draft restore)
-  useEffect(() => {
-    if (!isApiReady || !loadState.docId || !loadState.sceneJson) {
-      return;
-    }
-    // Only apply if we haven't just loaded this doc (avoid double apply)
-    // This is handled by the separate docId effect above
-  }, [isApiReady, loadState.docId, loadState.sceneJson]);
+  }, [applyScene, isApiReady, sceneLoadKey]);
 
   useEffect(() => {
     if (saveTimeout.current) {
       window.clearTimeout(saveTimeout.current);
       saveTimeout.current = null;
     }
-  }, [loadState.docId]);
+  }, [sceneLoadKey]);
 
   useEffect(() => {
     if ((!isApiReady && !mapReady) || didSendReady.current) {
@@ -402,7 +424,7 @@ export default function App() {
           }}
         />
       ) : <Excalidraw
-        key={loadState.docId || "default"}
+        key={sceneLoadKey}
         excalidrawAPI={handleExcalidrawAPI}
         initialData={initialScene as never}
         viewModeEnabled={loadState.readOnly}
@@ -424,12 +446,6 @@ export default function App() {
           ) {
             return;
           }
-          sendToNative(
-            sendEnvelope("didChange", {
-              docId: loadState.docId,
-              dirty: true
-            })
-          );
           scheduleSave(loadState.docId);
         }}
       />}

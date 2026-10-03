@@ -39,4 +39,32 @@ final class DocumentRenameTests: XCTestCase {
         XCTAssertEqual(json["marker"] as? String, "latest")
         XCTAssertEqual(manager.currentEntry?.fileName, "final.excalidraw")
     }
+    func testAsyncRenameRedirectsQueuedRawSavesWithoutChangingDocumentIdentity() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FolderSourceStore(userDefaults: UserDefaults(suiteName: UUID().uuidString)!, indexStore: ExcalidrawJSONFileIndexStore(fileURL: root.appendingPathComponent("index.json")))
+        let manager = DocumentManager(store: store), oldURL = root.appendingPathComponent("old.mindmap")
+        try Data("{}".utf8).write(to: oldURL)
+        let entry = try XCTUnwrap(store.upsertEntry(for: oldURL, folderId: UUID(), rootURL: root))
+        manager.activate(entry: entry)
+        let done = expectation(description: "Rename and late save complete")
+        done.expectedFulfillmentCount = 2
+        manager.renameEntry(entry, to: "new") { result in
+            XCTAssertTrue(Thread.isMainThread)
+            guard case .success(let renamed) = result else { XCTFail("Rename failed"); done.fulfill(); return }
+            XCTAssertEqual(renamed.fileName, "new.mindmap")
+            XCTAssertEqual(renamed.id, entry.id)
+            done.fulfill()
+        }
+        manager.saveScene(docId: oldURL.path, sceneJson: "{\"marker\":\"latest\"}") { result in
+            guard case .success(let saved) = result else { XCTFail("Late save failed"); done.fulfill(); return }
+            XCTAssertEqual(saved.fileName, "new.mindmap")
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 5)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: oldURL.path))
+        XCTAssertEqual(manager.currentEntry?.id, entry.id)
+    }
+
 }

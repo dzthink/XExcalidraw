@@ -144,8 +144,10 @@ final class ExcalidrawIOSUITests: XCTestCase {
             XCTAssertLessThanOrEqual(field.frame.maxY, accessory.frame.minY, "The editing node remains above the input accessory")
             attachScreenshot(app, name: "\(mode) native keyboard accessory")
             app.typeText(".")
-            let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: mode == "思维导图" ? "value == %@" : "value CONTAINS %@", mode == "思维导图" ? "中心主题." : "."), object: field)
+            let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "."), object: field)
             XCTAssertEqual(XCTWaiter.wait(for: [changed], timeout: 5), .completed)
+            let typedValue = field.value as? String ?? ""
+            XCTAssertEqual(typedValue.replacingOccurrences(of: ".", with: "").trimmingCharacters(in: .whitespacesAndNewlines), "中心主题")
             let undo = accessory.buttons["撤销"], redo = accessory.buttons["重做"]
             revealAccessoryButton(undo, in: accessory)
             undo.tap()
@@ -153,7 +155,7 @@ final class ExcalidrawIOSUITests: XCTestCase {
             XCTAssertEqual(XCTWaiter.wait(for: [reverted], timeout: 5), .completed)
             revealAccessoryButton(redo, in: accessory)
             redo.tap()
-            let redone = XCTNSPredicateExpectation(predicate: NSPredicate(format: mode == "思维导图" ? "value == %@" : "value CONTAINS %@", mode == "思维导图" ? "中心主题." : "."), object: field)
+            let redone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", typedValue), object: field)
             XCTAssertEqual(XCTWaiter.wait(for: [redone], timeout: 5), .completed)
             revealAccessoryButton(undo, in: accessory)
             undo.tap()
@@ -371,6 +373,107 @@ final class ExcalidrawIOSUITests: XCTestCase {
         let created = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Untitled-'")).firstMatch
         XCTAssertTrue(created.waitForExistence(timeout: 10), "Creation saves into the nested folder")
         attachScreenshot(app, name: "Nested folder with bottom actions")
+    }
+
+    func testLargeMindMapEditingGesturesAndSave() {
+        for mode in ["大纲", "思维导图"] {
+            let app = makeApplication()
+            app.launchEnvironment["SIYE_UI_TEST_FIXTURE"] = "documents"
+            app.launchEnvironment["SIYE_UI_TEST_LARGE_MAP"] = "1"
+            app.launch()
+            let file = app.staticTexts["Test Mind Map"].firstMatch
+            XCTAssertTrue(file.waitForExistence(timeout: 15))
+            let openStarted = Date()
+            file.tap()
+            let web = app.webViews["editor-ready"]
+            XCTAssertTrue(web.waitForExistence(timeout: 30))
+            print("DEVICE_LARGE_MAP open-to-ready \(mode): \(Date().timeIntervalSince(openStarted))s (includes XCTest overhead)")
+            web.buttons[mode].tap()
+            let title = web.staticTexts["中心主题"].firstMatch
+            XCTAssertTrue(title.waitForExistence(timeout: 10))
+            if mode == "思维导图" { title.doubleTap() } else { title.tap() }
+            let accessory = app.otherElements["mindmap-keyboard-accessory"].firstMatch
+            XCTAssertTrue(accessory.waitForExistence(timeout: 10))
+            let label = mode == "思维导图" ? "节点正文" : "文档标题"
+            let field = web.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR identifier == %@", label, label)).firstMatch
+            XCTAssertTrue(field.waitForExistence(timeout: 5))
+            let marker = "device-save-1234567890"
+            app.typeText(marker)
+            let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", marker), object: field)
+            XCTAssertEqual(XCTWaiter.wait(for: [changed], timeout: 10), .completed)
+            attachScreenshot(app, name: "1000 nodes \(mode) input")
+            accessory.buttons["收起键盘"].tap()
+            if mode == "思维导图" {
+                web.pinch(withScale: 0.7, velocity: -1)
+                web.pinch(withScale: 1.3, velocity: 1)
+                web.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.7)).press(forDuration: 0.05, thenDragTo: web.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.5)))
+            } else {
+                web.swipeUp()
+                web.swipeDown()
+            }
+            attachScreenshot(app, name: "1000 nodes \(mode) gestures")
+            app.buttons["返回"].tap()
+            XCTAssertTrue(file.waitForExistence(timeout: 15))
+            file.tap()
+            XCTAssertTrue(web.waitForExistence(timeout: 30))
+            web.buttons["大纲"].tap()
+            XCTAssertTrue(web.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", marker)).firstMatch.waitForExistence(timeout: 10), "Returning and reopening must retain the latest input")
+            attachScreenshot(app, name: "1000 nodes \(mode) persisted input")
+            app.terminate()
+        }
+    }
+
+    func testChineseNineKeyCompositionAndSave() throws {
+        let app = makeApplication()
+        app.launchEnvironment["SIYE_UI_TEST_FIXTURE"] = "documents"
+        app.launch()
+        let file = app.staticTexts["Test Mind Map"].firstMatch
+        XCTAssertTrue(file.waitForExistence(timeout: 15))
+        file.tap()
+        let web = app.webViews["editor-ready"]
+        XCTAssertTrue(web.waitForExistence(timeout: 30))
+        web.buttons["大纲"].tap()
+        web.staticTexts["中心主题"].firstMatch.tap()
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 10))
+        let letters = ["M N O", "G H I", "G H I", "A B C", "M N O"]
+        let firstKey = keyboard.keys.matching(NSPredicate(format: "label CONTAINS[c] %@", letters[0])).firstMatch
+        guard firstKey.exists else {
+            throw XCTSkip("The active keyboard does not expose Chinese nine-key letter keys; input method settings are left unchanged")
+        }
+        for letters in letters {
+            let key = keyboard.keys.matching(NSPredicate(format: "label CONTAINS[c] %@", letters)).firstMatch
+            XCTAssertTrue(key.exists, keyboard.debugDescription)
+            key.tap()
+        }
+        let candidate = app.cells["你好"].firstMatch
+        XCTAssertTrue(candidate.waitForExistence(timeout: 5), app.debugDescription)
+        candidate.tap()
+        let field = web.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR identifier == %@", "文档标题", "文档标题")).firstMatch
+        let committed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "你好"), object: field)
+        XCTAssertEqual(XCTWaiter.wait(for: [committed], timeout: 5), .completed)
+        attachScreenshot(app, name: "Chinese nine-key committed candidate")
+        app.otherElements["mindmap-keyboard-accessory"].firstMatch.buttons["收起键盘"].tap()
+        app.buttons["返回"].tap()
+        XCTAssertTrue(file.waitForExistence(timeout: 15))
+        file.tap()
+        XCTAssertTrue(web.waitForExistence(timeout: 30))
+        web.buttons["大纲"].tap()
+        XCTAssertTrue(web.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "你好")).firstMatch.waitForExistence(timeout: 10))
+    }
+
+    func testReleaseLaunchSmoke() throws {
+#if DEBUG
+        throw XCTSkip("Run the normal-configuration startup check with a Release build")
+#else
+        let app = makeApplication()
+        app.launch()
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            app.buttons["browser-create"].exists || app.buttons["选择文件夹"].exists || app.webViews["editor-ready"].exists
+        }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 30), .completed, app.debugDescription)
+        attachScreenshot(app, name: "Release launch on device")
+#endif
     }
 
     private func revealAccessoryButton(_ button: XCUIElement, in accessory: XCUIElement) {

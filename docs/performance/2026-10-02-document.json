@@ -1,0 +1,93 @@
+{
+  "runtime": "v26.7.0",
+  "arch": "arm64",
+  "samples": 60,
+  "warmup": 10,
+  "fixture_directory": "/var/folders/tv/dz993nln4f374xl11_vv0r500000gn/T/siye-perf-OfafU6",
+  "results": [
+    {
+      "nodes": 100,
+      "utf8_bytes": 50499,
+      "change_grouped": {
+        "p50_ms": 0.305,
+        "p95_ms": 0.41
+      },
+      "change_separate": {
+        "p50_ms": 0.326,
+        "p95_ms": 0.546
+      },
+      "stringify_save": {
+        "p50_ms": 0.08,
+        "p95_ms": 0.091
+      },
+      "topology": {
+        "p50_ms": 0.006,
+        "p95_ms": 0.012
+      },
+      "full_snapshot_200_utf8_MiB": 9.6
+    },
+    {
+      "nodes": 500,
+      "utf8_bytes": 252849,
+      "change_grouped": {
+        "p50_ms": 1.823,
+        "p95_ms": 2.244
+      },
+      "change_separate": {
+        "p50_ms": 1.814,
+        "p95_ms": 2.027
+      },
+      "stringify_save": {
+        "p50_ms": 0.531,
+        "p95_ms": 0.648
+      },
+      "topology": {
+        "p50_ms": 0.034,
+        "p95_ms": 0.047
+      },
+      "full_snapshot_200_utf8_MiB": 48.2
+    },
+    {
+      "nodes": 1000,
+      "utf8_bytes": 505787,
+      "change_grouped": {
+        "p50_ms": 3.518,
+        "p95_ms": 4.39
+      },
+      "change_separate": {
+        "p50_ms": 3.575,
+        "p95_ms": 4.098
+      },
+      "stringify_save": {
+        "p50_ms": 0.443,
+        "p95_ms": 1.084
+      },
+      "topology": {
+        "p50_ms": 0.049,
+        "p95_ms": 0.051
+      },
+      "full_snapshot_200_utf8_MiB": 96.5
+    },
+    {
+      "nodes": 5000,
+      "utf8_bytes": 2529287,
+      "change_grouped": {
+        "p50_ms": 15.536,
+        "p95_ms": 17.233
+      },
+      "change_separate": {
+        "p50_ms": 15.598,
+        "p95_ms": 21.77
+      },
+      "stringify_save": {
+        "p50_ms": 1.955,
+        "p95_ms": 3.357
+      },
+      "topology": {
+        "p50_ms": 0.254,
+        "p95_ms": 0.34
+      },
+      "full_snapshot_200_utf8_MiB": 482.4
+    }
+  ]
+}

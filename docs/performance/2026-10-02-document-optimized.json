@@ -1,0 +1,109 @@
+{
+  "runtime": "v26.7.0",
+  "arch": "arm64",
+  "samples": 60,
+  "warmup": 10,
+  "fixture_directory": "/var/folders/tv/dz993nln4f374xl11_vv0r500000gn/T/siye-perf-doNvk5",
+  "results": [
+    {
+      "nodes": 100,
+      "utf8_bytes": 50499,
+      "change_grouped": {
+        "p50_ms": 0.3,
+        "p95_ms": 0.379
+      },
+      "change_separate": {
+        "p50_ms": 0.339,
+        "p95_ms": 0.607
+      },
+      "change_node_local": {
+        "p50_ms": 0.003,
+        "p95_ms": 0.005
+      },
+      "stringify_save": {
+        "p50_ms": 0.035,
+        "p95_ms": 0.049
+      },
+      "topology": {
+        "p50_ms": 0.006,
+        "p95_ms": 0.012
+      },
+      "full_snapshot_200_utf8_MiB": 9.6
+    },
+    {
+      "nodes": 500,
+      "utf8_bytes": 252849,
+      "change_grouped": {
+        "p50_ms": 1.79,
+        "p95_ms": 2.113
+      },
+      "change_separate": {
+        "p50_ms": 1.962,
+        "p95_ms": 2.164
+      },
+      "change_node_local": {
+        "p50_ms": 0.003,
+        "p95_ms": 0.004
+      },
+      "stringify_save": {
+        "p50_ms": 0.156,
+        "p95_ms": 0.172
+      },
+      "topology": {
+        "p50_ms": 0.035,
+        "p95_ms": 0.048
+      },
+      "full_snapshot_200_utf8_MiB": 48.2
+    },
+    {
+      "nodes": 1000,
+      "utf8_bytes": 505787,
+      "change_grouped": {
+        "p50_ms": 3.294,
+        "p95_ms": 3.673
+      },
+      "change_separate": {
+        "p50_ms": 4.207,
+        "p95_ms": 7.145
+      },
+      "change_node_local": {
+        "p50_ms": 0.003,
+        "p95_ms": 0.003
+      },
+      "stringify_save": {
+        "p50_ms": 0.356,
+        "p95_ms": 0.417
+      },
+      "topology": {
+        "p50_ms": 0.048,
+        "p95_ms": 0.055
+      },
+      "full_snapshot_200_utf8_MiB": 96.5
+    },
+    {
+      "nodes": 5000,
+      "utf8_bytes": 2529287,
+      "change_grouped": {
+        "p50_ms": 17.826,
+        "p95_ms": 19.127
+      },
+      "change_separate": {
+        "p50_ms": 17.146,
+        "p95_ms": 21.23
+      },
+      "change_node_local": {
+        "p50_ms": 0.003,
+        "p95_ms": 0.003
+      },
+      "stringify_save": {
+        "p50_ms": 1.818,
+        "p95_ms": 2.343
+      },
+      "topology": {
+        "p50_ms": 0.242,
+        "p95_ms": 0.304
+      },
+      "full_snapshot_200_utf8_MiB": 482.4
+    }
+  ]
+}

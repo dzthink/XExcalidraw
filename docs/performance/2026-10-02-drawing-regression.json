@@ -1,0 +1,7 @@
+{
+  "checks" : [
+    "Trusted rectangle drawing and native save acknowledgement",
+    "In-flight edits save the latest drawing revision",
+    "Rename keeps the canvas and saves new edits to the new document ID"
+  ]
+}

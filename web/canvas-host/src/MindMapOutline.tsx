@@ -1,7 +1,13 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { TextSelection } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 import RichEditor, { type EditorHandle } from "./mindmap/RichEditor";
 import type { MapNode, Cursor, RichDocument, StructureAction } from "./mindmap/document";
+import { renderContent, safeLink } from "./mindmap/richText";
+const StaticContent = memo(function StaticContent({ content, docId }: { content: RichDocument; docId: string }) {
+  return <div className="mindmap-rich-content" dangerouslySetInnerHTML={{ __html: renderContent(content, docId) }} />;
+});
 export type OutlineProps = {
   root: MapNode; docId: string; readOnly: boolean; selected: string[]; restore: Cursor | null;
   scroll: number; onScroll: (top: number) => void; select: (id: string, multiple?: boolean) => void;
@@ -15,6 +21,9 @@ export default function MindMapOutline(props: OutlineProps) {
   const scroll = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<string | null>(null);
   const [drop, setDrop] = useState<{ id: string; position: "before" | "after" | "inside" } | null>(null);
+  const [editingId, setEditingId] = useState(props.root.id);
+  const clickPosition = useRef<{ x: number; y: number } | null>(null);
+  useLayoutEffect(() => { if (props.restore) setEditingId(props.restore.id); }, [props.restore]);
   useLayoutEffect(() => { if (scroll.current) scroll.current.scrollTop = props.scroll; }, []);
   useEffect(() => {
     if (!menu) return;
@@ -32,9 +41,35 @@ export default function MindMapOutline(props: OutlineProps) {
       document.removeEventListener("keydown", escape, true);
     };
   }, [menu]);
-  const editor = (node: MapNode) => <RichEditor id={node.id} content={node.content} docId={props.docId} readOnly={props.readOnly}
+  const editor = (node: MapNode) => node.id === editingId && !props.readOnly ? <RichEditor id={node.id} content={node.content} docId={props.docId} readOnly={props.readOnly}
     label={node === props.root ? "文档标题" : "节点正文"} onChange={(content, before, after) => props.content(node.id, content, before, after)}
-    onActive={props.active} onBlur={props.blur} onKey={(view, event) => props.onKey(node.id, view, event)} onImage={props.image} onResize={() => {}} restore={props.restore} />;
+    onActive={handle => {
+      const point = clickPosition.current; clickPosition.current = null;
+      if (point) {
+        const position = handle.view.posAtCoords({ left: point.x, top: point.y });
+        if (position) handle.view.dispatch(handle.view.state.tr.setSelection(TextSelection.near(handle.view.state.doc.resolve(position.pos))));
+      }
+      props.active(handle);
+    }} onBlur={props.blur} onKey={(view, event) => props.onKey(node.id, view, event)} onImage={props.image} onResize={() => {}} restore={props.restore} /> :
+    <div data-editor-id={node.id} role="textbox" aria-label={node === props.root ? "文档标题" : "节点正文"} tabIndex={0}
+      onClick={event => {
+        const link = (event.target as HTMLElement).closest("a");
+        if (link && (props.readOnly || event.metaKey || event.ctrlKey)) {
+          event.preventDefault(); const href = safeLink(link.getAttribute("href") ?? "");
+          if (href) window.dispatchEvent(new CustomEvent("mindmap-open-link", { detail: href }));
+          return;
+        }
+        if (props.readOnly || event.shiftKey) return;
+        event.preventDefault(); clickPosition.current = { x: event.clientX, y: event.clientY };
+        flushSync(() => setEditingId(node.id));
+        scroll.current?.querySelector<HTMLElement>(".ProseMirror")?.focus();
+      }} onKeyDown={event => {
+        if (props.readOnly || event.key !== "Enter") return;
+        event.preventDefault(); flushSync(() => setEditingId(node.id));
+        scroll.current?.querySelector<HTMLElement>(".ProseMirror")?.focus();
+      }}>
+      <StaticContent content={node.content} docId={props.docId} />
+    </div>;
   const row = (node: MapNode) => <div className="outline-item" key={node.id}>
     <div className={`outline-row ${props.selected.includes(node.id) ? "is-selected" : ""} ${drop?.id === node.id ? `drop-${drop.position}` : ""}`} data-outline-id={node.id}
       onClick={event => { if (event.shiftKey) { event.preventDefault(); props.select(node.id, true); } }}

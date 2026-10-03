@@ -25,6 +25,7 @@ export default function RichEditor(props: Props) {
   const [isActive, setIsActive] = useState(false);
   const [hasBlocks, setHasBlocks] = useState(() => (props.content.content ?? []).some(node => !["paragraph", "heading"].includes(node.type)));
   const host = useRef<HTMLDivElement>(null);
+  const continueButton = useRef<HTMLButtonElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const latest = useRef(props); latest.current = props;
   useLayoutEffect(() => {
@@ -51,7 +52,6 @@ export default function RichEditor(props: Props) {
         const next = { ...previous, from: view.state.selection.from, to: view.state.selection.to };
         if (result.transactions.some(tr => tr.docChanged)) latest.current.onChange(view.state.doc.toJSON(), previous, next);
         latest.current.onActive({ id: props.id, view });
-        latest.current.onResize();
       },
       handleDOMEvents: {
         focus: () => { setIsActive(true); latest.current.onActive({ id: props.id, view }); return false; },
@@ -114,7 +114,15 @@ export default function RichEditor(props: Props) {
       }
     });
     viewRef.current = view;
-    return () => { viewRef.current = null; view.destroy(); };
+    // Selection transactions do not change geometry. Observe actual editor size.
+    let width = -1, height = -1;
+    const observer = new ResizeObserver(entries => {
+      const box = entries[0]?.contentRect;
+      if (!box || box.width === width && box.height === height) return;
+      width = box.width; height = box.height; latest.current.onResize();
+    });
+    observer.observe(view.dom);
+    return () => { observer.disconnect(); viewRef.current = null; view.destroy(); };
   }, [props.id]);
   useLayoutEffect(() => {
     const view = viewRef.current;
@@ -124,8 +132,8 @@ export default function RichEditor(props: Props) {
       const from = Math.min(view.state.selection.from, next.content.size);
       view.updateState(EditorState.create({ doc: next, plugins: [tableEditing(), trailingParagraph], selection: TextSelection.near(next.resolve(from)) }));
     }
-    view.setProps({ editable: () => !props.readOnly });
-  }, [props.content, props.readOnly]);
+  }, [props.content]);
+  useLayoutEffect(() => { viewRef.current?.setProps({ editable: () => !props.readOnly }); }, [props.readOnly, props.id]);
   useLayoutEffect(() => {
     const view = viewRef.current, cursor = props.restore;
     if (!view || !cursor || cursor.id !== props.id || cursor.field !== "content") return;
@@ -135,23 +143,39 @@ export default function RichEditor(props: Props) {
     view.dispatch(view.state.tr.setSelection(selection));
     view.focus();
   }, [props.restore]);
+  const continueInput = () => {
+    const view = viewRef.current;
+    if (!view || !continueAfterBlock(view.state, view.dispatch)) return;
+    const bookmark = view.state.selection.getBookmark();
+    view.focus();
+    // WebKit may restore the old native caret after moving out of a table.
+    requestAnimationFrame(() => {
+      if (viewRef.current !== view || !view.dom.isConnected) return;
+      view.dispatch(view.state.tr.setSelection(bookmark.resolve(view.state.doc)));
+    });
+  };
+  useLayoutEffect(() => {
+    const button = continueButton.current;
+    if (!button) return;
+    const touch = (event: TouchEvent) => {
+      event.preventDefault(); event.stopPropagation();
+      continueInput();
+    };
+    // Cancelling pointerdown does not cancel WebKit's native touch focus change.
+    button.addEventListener("touchstart", touch, { passive: false });
+    return () => button.removeEventListener("touchstart", touch);
+  }, [isActive, hasBlocks, props.readOnly]);
   const surface = host.current?.closest(".siye-editor");
   return <div className="mindmap-rich-editor">
     <div ref={host} />
-    {surface && isActive && hasBlocks && !props.readOnly && createPortal(<button type="button" className="mindmap-continue-after-block"
-      onPointerDown={event => { event.preventDefault(); event.stopPropagation(); }}
-      onClick={() => {
-        const view = viewRef.current;
-        if (!view || !continueAfterBlock(view.state, view.dispatch)) return;
-        const bookmark = view.state.selection.getBookmark();
-        view.focus();
-        // WebKit may restore the old native caret when the tapped button disappears.
-        requestAnimationFrame(() => {
-          if (viewRef.current !== view || !view.dom.isConnected) return;
-          view.dispatch(view.state.tr.setSelection(bookmark.resolve(view.state.doc)));
-          view.focus();
-        });
-      }}>在块后继续输入</button>, surface)}
+    {surface && isActive && hasBlocks && !props.readOnly && createPortal(<button ref={continueButton} type="button" className="mindmap-continue-after-block"
+      onMouseDown={event => event.preventDefault()}
+      onPointerDown={event => {
+        event.preventDefault(); event.stopPropagation();
+        // Retain native keyboard focus within the trusted touch event.
+        continueInput();
+      }}
+      onClick={continueInput}>在块后继续输入</button>, surface)}
   </div>;
 }
 export function selectImage(view: EditorView): boolean { return view.state.selection instanceof NodeSelection && view.state.selection.node.type.name === "image"; }

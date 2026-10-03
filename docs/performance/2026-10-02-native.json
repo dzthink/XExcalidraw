@@ -1,0 +1,84 @@
+{
+  "optimization" : "swiftc -O",
+  "results" : [
+    {
+      "build_tree_without_disk_enumeration" : {
+        "p50_ms" : 0.59804199999999996,
+        "p95_ms" : 0.69112499999999999
+      },
+      "entries" : 100,
+      "persist_index" : {
+        "p50_ms" : 4.9167500000000004,
+        "p95_ms" : 8.0300419999999999
+      }
+    },
+    {
+      "build_tree_without_disk_enumeration" : {
+        "p50_ms" : 3.89575,
+        "p95_ms" : 4.1323749999999997
+      },
+      "entries" : 1000,
+      "persist_index" : {
+        "p50_ms" : 8.0305,
+        "p95_ms" : 19.411625000000001
+      }
+    },
+    {
+      "build_tree_without_disk_enumeration" : {
+        "p50_ms" : 45.266750000000002,
+        "p95_ms" : 46.400916000000002
+      },
+      "entries" : 10000,
+      "persist_index" : {
+        "p50_ms" : 52.889417000000002,
+        "p95_ms" : 59.606875000000002
+      }
+    },
+    {
+      "inbound_parse_and_validate" : {
+        "p50_ms" : 0.83491700000000002,
+        "p95_ms" : 0.902416
+      },
+      "nodes" : 100,
+      "outbound_serialize_and_escape" : {
+        "p50_ms" : 0.920458,
+        "p95_ms" : 0.95504199999999995
+      }
+    },
+    {
+      "inbound_parse_and_validate" : {
+        "p50_ms" : 4.0421250000000004,
+        "p95_ms" : 4.246041
+      },
+      "nodes" : 500,
+      "outbound_serialize_and_escape" : {
+        "p50_ms" : 4.5739169999999998,
+        "p95_ms" : 4.7522919999999997
+      }
+    },
+    {
+      "inbound_parse_and_validate" : {
+        "p50_ms" : 8.2304169999999992,
+        "p95_ms" : 8.5899999999999999
+      },
+      "nodes" : 1000,
+      "outbound_serialize_and_escape" : {
+        "p50_ms" : 9.1509590000000003,
+        "p95_ms" : 9.2687910000000002
+      }
+    },
+    {
+      "inbound_parse_and_validate" : {
+        "p50_ms" : 40.671957999999997,
+        "p95_ms" : 41.21425
+      },
+      "nodes" : 5000,
+      "outbound_serialize_and_escape" : {
+        "p50_ms" : 45.707833999999998,
+        "p95_ms" : 46.556417000000003
+      }
+    }
+  ],
+  "samples" : 30,
+  "warmup" : 5
+}

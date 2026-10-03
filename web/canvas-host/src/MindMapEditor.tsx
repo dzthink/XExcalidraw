@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
-import MindElixir, { type NodeObj, type Topic, type MindElixirData, type SubLineParams } from "mind-elixir";
+import MindElixir, { type NodeObj, type Topic, type MindElixirData, type SubLineParams, type Wrapper } from "mind-elixir";
 import { EditorView } from "prosemirror-view";
 import { TextSelection, AllSelection } from "prosemirror-state";
 import { splitListItem } from "prosemirror-schema-list";
@@ -8,6 +8,7 @@ import { addBridgeListener, sendEnvelope, sendToNative } from "./bridge";
 import MindMapOutline from "./MindMapOutline";
 import RichEditor, { type EditorHandle } from "./mindmap/RichEditor";
 import NodeToolbar from "./mindmap/NodeToolbar";
+import { refreshRichTextLinks } from "./mindmap/links";
 import { trackKeyboardViewport } from "./mindmap/keyboardViewport";
 import { DocumentStore, parseDocument, newDocument, findNode, parentOf, visibleNodes, structure, moveNodes, newNode, descendantCount, type MapDocument, type MapNode, type Cursor, type RichDocument, type StructureAction } from "./mindmap/document";
 import { readContent, renderContent, contentText, schema, safeLink } from "./mindmap/richText";
@@ -43,6 +44,10 @@ export default function MindMapEditor(props: Props) {
   const pending = useRef(new Map<string, Pending>()), timer = useRef<number>(), savedRevision = useRef(0), flight = useRef<Promise<boolean> | null>(null);
   const contentCursors = useRef(new Map<string, Cursor>());
   const renderedNodes = useRef(new Map<string, { content: RichDocument; docId: string; expanded: boolean; children: number; html: string }>());
+  const topicElements = useRef(new Map<string, Topic>());
+  const pendingContent = useRef(new Set<string>());
+  const appliedSelected = useRef<string[]>([]);
+  const appliedEditing = useRef<string | null>(null);
   const shape = useRef(""), syncing = useRef(false), raf = useRef(0);
   const doc = store?.document, mode = doc?.views.mode ?? "outline";
   useEffect(() => { cancelLongPress(); setNodeMenu(null); }, [mode, props.readOnly]);
@@ -73,28 +78,30 @@ export default function MindMapEditor(props: Props) {
   });
   const captureMap = () => { if (!store || !mind.current || syncing.current) return; const map = mind.current; store.document.views.map = { scale: map.scaleVal, x: new DOMMatrixReadOnly(map.map.style.transform).m41, y: new DOMMatrixReadOnly(map.map.style.transform).m42 }; };
   const flush = async (): Promise<boolean> => {
-    window.clearTimeout(timer.current); if (!store || latest.current.readOnly) return true;
-    if (uploads.current.size) { await Promise.all([...uploads.current]); window.clearTimeout(timer.current); }
+    window.clearTimeout(timer.current); timer.current = undefined; if (!store || latest.current.readOnly) return true;
+    if (uploads.current.size) { await Promise.all([...uploads.current]); window.clearTimeout(timer.current); timer.current = undefined; }
     if (flight.current) { const okay = await flight.current; return okay ? flush() : false; }
     captureMap(); if (savedRevision.current === store.revision) return true;
     const revision = store.revision, sceneJSON = JSON.stringify(store.document); setSaving(true);
     const task = (async () => { try { await request("saveScene", { docId: latest.current.docId, sceneJson: sceneJSON, source: "web" }); savedRevision.current = revision; setError(""); return true; } catch (failure) { setError(failure instanceof Error ? failure.message : "保存失败"); return false; } finally { setSaving(false); flight.current = null; } })();
     flight.current = task; const okay = await task;
-    if (okay && store.revision !== revision) return flush(); return okay;
+    if (okay && store.revision !== revision) return flush();
+    if (okay) sendToNative(sendEnvelope("didChange", { docId: latest.current.docId, dirty: false }));
+    return okay;
   };
   const schedule = () => { if (props.readOnly || !store) return; const alreadyScheduled = timer.current !== undefined; window.clearTimeout(timer.current); timer.current = window.setTimeout(() => { timer.current = undefined; void flush(); }, 500); if (!alreadyScheduled) sendToNative(sendEnvelope("didChange", { docId: props.docId, dirty: true })); };
   const update = () => redraw(value => value + 1);
   const change = (mutate: (doc: MapDocument) => void, group: string | null = null) => { if (!store || props.readOnly) return; if (store.change(mutate, group)) { update(); schedule(); } };
   const updateView = (mutate: (doc: MapDocument) => void) => { if (!store) return; mutate(store.document); update(); if (!props.readOnly) { store.revision++; schedule(); } };
   const select = (id: string, multiple = false) => {
-    if (!store || !findNode(store.document.nodeData, id)) return;
+    if (!store || !store.node(id)) return;
     if (!multiple && store.document.views.selectedIds.length === 1 && selectedId === id) return;
     store.boundary(); if (editing !== id || multiple) { setEditing(null); activeRef.current = null; setActive(null); }
     updateView(document => { document.views.selectedIds = multiple ? document.views.selectedIds.includes(id) ? document.views.selectedIds.filter(item => item !== id) : [...document.views.selectedIds, id] : [id]; });
   };
   const edit = (id: string, atEnd = false) => {
     if (props.readOnly || !store) return;
-    const node = findNode(store.document.nodeData, id); if (!node) return;
+    const node = store.node(id); if (!node) return;
     const end = TextSelection.atEnd(readContent(node.content)).from;
     select(id); setEditing(id);
     setRestore(!atEnd && contentCursors.current.get(id) || { id, from: end, to: end, field: "content" });
@@ -115,13 +122,16 @@ export default function MindMapEditor(props: Props) {
     if (changedNode) { store.boundary(); if (!store.document.views.selectedIds.includes(handle.id)) { store.document.views.selectedIds = [handle.id]; update(); } }
   };
   const content = (id: string, value: RichDocument, before: Cursor, after: Cursor) => {
-    if (!store) return; store.cursor = before; change(document => { const node = findNode(document.nodeData, id); if (node) node.content = value; }, `content:${id}`); store.cursor = after;
+    if (!store || props.readOnly) return; store.cursor = before;
+    if (store.changeContent(id, value)) { pendingContent.current.add(id); update(); schedule(); }
+    store.cursor = after;
   };
   const undo = (redo = false) => {
     if (!store || props.readOnly || !(redo ? store.redo() : store.undo())) return;
+    if (store.cursor) pendingContent.current.add(store.cursor.id);
     const cursor = store.cursor; setEditing(cursor?.id ?? null); setRestore(cursor && { ...cursor }); activeRef.current = null; setActive(null); update(); schedule();
   };
-  const focusCursor = (id: string, end = false) => { if (!store) return; select(id); const size = readContent(findNode(store.document.nodeData, id)!.content).content.size; setEditing(id); setRestore({ id, from: end ? Math.max(1, size - 1) : 1, to: end ? Math.max(1, size - 1) : 1, field: "content" }); };
+  const focusCursor = (id: string, end = false) => { if (!store) return; select(id); const size = readContent(store.node(id)!.content).content.size; setEditing(id); setRestore({ id, from: end ? Math.max(1, size - 1) : 1, to: end ? Math.max(1, size - 1) : 1, field: "content" }); };
   const onKey = (id: string, view: EditorView, event: KeyboardEvent): boolean => {
     if (!store || props.readOnly || event.isComposing || view.composing) return false;
     if (event.key === "Enter" && event.shiftKey) {
@@ -139,7 +149,7 @@ export default function MindMapEditor(props: Props) {
     }
     if (mode !== "outline" || inComplex) return false;
     if (event.key === "Tab") { action(event.shiftKey ? "outdent" : "indent", [id]); return true; }
-    const node = findNode(store.document.nodeData, id)!;
+    const node = store.node(id)!;
     if (event.key === "Backspace" && !contentText(node.content) && !node.note && !node.children.length && id !== store.document.nodeData.id) { action("delete", [id]); requestAnimationFrame(() => { const target = store.document.views.selectedIds[0]; if (target) focusCursor(target, true); }); return true; }
     if (selection.empty && ((event.key === "ArrowUp" || event.key === "ArrowLeft") && selection.from <= 1 || (event.key === "ArrowDown" || event.key === "ArrowRight") && selection.to >= view.state.doc.content.size - 1)) {
       const nodes = visibleNodes(root!), index = nodes.findIndex(node => node.id === id), previous = ["ArrowUp", "ArrowLeft"].includes(event.key); const target = nodes[index + (previous ? -1 : 1)]; if (target) { focusCursor(target.id, previous); return true; }
@@ -170,7 +180,29 @@ export default function MindMapEditor(props: Props) {
     } catch (failure) { setError(failure instanceof Error ? failure.message : "图片保存失败"); }
   };
   const upload = (file: File, view: EditorView) => { const task = image(file, view); uploads.current.add(task); void task.finally(() => uploads.current.delete(task)); };
-  const resize = () => { cancelAnimationFrame(raf.current); raf.current = requestAnimationFrame(() => { if (mind.current && mode === "map") mind.current.linkDiv(); }); };
+  const resizedTopics = useRef(new Set<string>());
+  const resizeAll = useRef(false);
+  const resize = (id?: string) => {
+    if (id) resizedTopics.current.add(id); else resizeAll.current = true;
+    if (raf.current) return;
+    raf.current = requestAnimationFrame(() => {
+      raf.current = 0;
+      const instance = mind.current;
+      if (!instance || mode !== "map") return;
+      const ids = [...resizedTopics.current]; resizedTopics.current.clear();
+      const all = resizeAll.current; resizeAll.current = false;
+      const branches = new Set<Wrapper>();
+      for (const id of ids) {
+        const topic = topicElements.current.get(id);
+        if (!topic) continue;
+        let wrapper = topic.closest<Wrapper>("me-wrapper");
+        while (wrapper && wrapper.parentElement?.tagName !== "ME-MAIN") wrapper = wrapper.parentElement?.closest<Wrapper>("me-wrapper") ?? null;
+        if (wrapper) branches.add(wrapper);
+      }
+      // Root edits translate entire branches without changing branch-local paths.
+      refreshRichTextLinks(instance, all || !ids.length ? null : branches);
+    });
+  };
   useEffect(() => {
     const unsubscribe = addBridgeListener(message => {
       if (!["saveResult", "attachmentSaved", "attachmentSaveFailed"].includes(message.type)) return;
@@ -234,6 +266,16 @@ export default function MindMapEditor(props: Props) {
       } finally { exporter.destroy(); wrapper.remove(); }
     };
   });
+  const mapShape = () => `${store?.structureRevision}:${root?.id}:${doc?.settings.layout}:${doc?.settings.palette}:${props.theme}`;
+  const indexTopics = (instance: MindElixir) => {
+    topicElements.current.clear();
+    for (const id of renderedNodes.current.keys()) if (!store?.node(id)) { renderedNodes.current.delete(id); contentCursors.current.delete(id); }
+    instance.nodes.querySelectorAll<Topic>("me-tpc").forEach(element => {
+      topicElements.current.set(element.nodeObj.id, element);
+      element.dataset.depth = String((element.nodeObj.metadata as { depth?: number } | undefined)?.depth ?? 0);
+      pendingContent.current.add(element.nodeObj.id);
+    });
+  };
   useLayoutEffect(() => {
     if (!store || !host.current || mode !== "map") return;
     const menuCommand = (command: "edit" | "fold") => {
@@ -282,6 +324,12 @@ export default function MindMapEditor(props: Props) {
       }
     });
     mind.current = instance; syncing.current = true; instance.init(mapData()); syncing.current = false;
+    // A solid background hit region avoids expensive WebKit region unions.
+    // Its class preserves the library's empty-canvas selection and pan gestures.
+    const background = document.createElement("div");
+    background.className = "map-container"; background.dataset.siyeMapBackground = ""; background.setAttribute("aria-hidden", "true");
+    background.style.cssText = "position:absolute;inset:0;pointer-events:auto;background:transparent";
+    instance.map.prepend(background);
     const menu = instance.container.querySelector<HTMLElement>(".context-menu");
     const focusItem = menu?.querySelector<HTMLElement>("#cm-fucus"), returnItem = menu?.querySelector<HTMLElement>("#cm-unfucus");
     if (focusItem) focusItem.onclick = () => { if (menu) menu.hidden = true; callbacks.current.focus(instance.currentNode?.nodeObj.id ?? null); };
@@ -298,34 +346,45 @@ export default function MindMapEditor(props: Props) {
     const viewport = () => { if (syncing.current) return; captureMap(); store.revision++; schedule(); };
     instance.bus.addListener("scale", viewport); instance.bus.addListener("move", viewport);
     instance.bus.addListener("changeDirection", direction => { callbacks.current.change(document => { document.settings.layout = direction === MindElixir.LEFT ? "left" : direction === MindElixir.RIGHT ? "right" : direction === MindElixir.DOWN ? "down" : "side"; }); });
-    const observe = new ResizeObserver(resize); observe.observe(instance.nodes);
-    props.onReady(instance); shape.current = ""; update();
-    return () => { captureMap(); observe.disconnect(); instance.destroy(); mind.current = null; shape.current = ""; setAnchor(null); props.onReady(null); };
+    const observe = new ResizeObserver(() => resize()); observe.observe(instance.nodes);
+    indexTopics(instance); shape.current = mapShape();
+    props.onReady(instance); update();
+    return () => { captureMap(); observe.disconnect(); instance.destroy(); mind.current = null; shape.current = ""; topicElements.current.clear(); setAnchor(null); props.onReady(null); };
   }, [mode]);
   useLayoutEffect(() => {
     const instance = mind.current; if (!instance || !store || !root || mode !== "map") return;
     instance.editable = !props.readOnly;
-    const topology = (node: MapNode): unknown => [node.id, node.expanded, node.children.map(topology)];
-    const key = JSON.stringify([topology(root), doc!.settings.layout, doc!.settings.palette, props.theme]);
+    const key = mapShape();
     syncing.current = true;
     if (shape.current !== key) {
-      // Unmount React portals before MindElixir replaces their parent nodes.
+      // Detach the portal before the library replaces its parent nodes.
       if (anchor) { syncing.current = false; setAnchor(null); return; }
       const transform = instance.map.style.transform, scale = instance.scaleVal;
-      setAnchor(null); const nextData = mapData(); instance.direction = nextData.direction!; instance.refresh(nextData); instance.scaleVal = scale; instance.map.style.transform = transform; shape.current = key;
-      const topics = store.document.views.selectedIds.flatMap(id => { try { return [instance.findEle(id)]; } catch { return []; } });
+      const nextData = mapData(); instance.direction = nextData.direction!; instance.refresh(nextData);
+      instance.scaleVal = scale; instance.map.style.transform = transform; shape.current = key;
+      indexTopics(instance);
+      const topics = store.document.views.selectedIds.flatMap(id => topicElements.current.get(id) ?? []);
       instance.clearSelection(); instance.selectNodes(topics);
       if (editing && store.cursor?.id === editing) setRestore({ ...store.cursor });
     }
+    const changedIds = new Set([...pendingContent.current, ...appliedSelected.current, ...selected]);
+    if (appliedEditing.current) changedIds.add(appliedEditing.current);
+    if (editing) changedIds.add(editing);
     let geometryChanged = false;
-    let nextAnchor: HTMLElement | null = null;
-    const visit = (node: MapNode, depth: number) => { let element; try { element = instance.findEle(node.id); } catch { return; } if (!element) return;
-      element.dataset.depth = String(depth); element.classList.toggle("siye-selected", store.document.views.selectedIds.includes(node.id)); element.classList.toggle("siye-editing", editing === node.id);
-      if (editing !== node.id) { const html = nodeHTML(node); if (element.innerHTML !== html) { element.innerHTML = html; geometryChanged = true; } }
-      if (editing === node.id) nextAnchor = element;
-      if (node.expanded) node.children.forEach(child => visit(child, depth + 1));
-    };
-    visit(root, 0); syncing.current = false;
+    for (const id of changedIds) {
+      const element = topicElements.current.get(id), node = store.node(id);
+      if (!element || !node) continue;
+      const isSelected = selected.includes(id), isEditing = editing === id;
+      if (element.classList.contains("siye-selected") !== isSelected) element.classList.toggle("siye-selected", isSelected);
+      if (element.classList.contains("siye-editing") !== isEditing) element.classList.toggle("siye-editing", isEditing);
+      if (editing !== id) {
+        const html = nodeHTML(node);
+        if (element.innerHTML !== html) { element.innerHTML = html; geometryChanged = true; resizedTopics.current.add(id); }
+      }
+    }
+    pendingContent.current.clear(); appliedSelected.current = [...selected]; appliedEditing.current = editing;
+    syncing.current = false;
+    const nextAnchor = editing ? topicElements.current.get(editing) ?? null : null;
     if (anchor !== nextAnchor) setAnchor(nextAnchor);
     if (geometryChanged) resize();
   });
@@ -347,7 +406,7 @@ export default function MindMapEditor(props: Props) {
   const focus = (id: string | null) => { setEditing(null); activeRef.current = null; setActive(null); updateView(document => { document.views.focusId = id === document.nodeData.id ? null : id; document.views.selectedIds = id ? [id] : []; }); };
   const switchView = async (nextMode: "outline" | "map") => { if (mode === nextMode || !(await flush())) return; setEditing(null); activeRef.current = null; setActive(null); updateView(document => { document.views.mode = nextMode; }); };
   if (!store || !doc || !root) return <div className="mindmap-unsupported" role="alert"><h2>此文档使用旧版或不支持的思维导图格式</h2><p>请新建思维导图。原文件保持不变。</p></div>;
-  const editNode = editing ? findNode(doc.nodeData, editing) : null;
+  const editNode = editing ? store.node(editing) : null;
   return <div ref={editorHost} className={`mindmap-editor siye-editor theme-${props.theme} palette-${doc.settings.palette}`}
     onTouchStartCapture={event => {
       cancelLongPress();
@@ -410,12 +469,12 @@ export default function MindMapEditor(props: Props) {
       if (!topic || !mind.current) return;
       event.preventDefault(); event.stopPropagation(); const id = topic.nodeObj.id;
       const ids = selected.includes(id) ? selected.filter(item => item !== id) : [...selected, id];
-      syncing.current = true; mind.current.clearSelection(); mind.current.selectNodes(ids.map(item => mind.current!.findEle(item))); syncing.current = false;
+      syncing.current = true; mind.current.clearSelection(); mind.current.selectNodes(ids.map(item => topicElements.current.get(item)!)); syncing.current = false;
       setEditing(null); activeRef.current = null; setActive(null); updateView(document => { document.views.selectedIds = ids; });
     }} onClick={event => { const link = (event.target as HTMLElement).closest("a"); if (link) { event.preventDefault(); const href = safeLink(link.getAttribute("href") ?? ""); if (href) sendToNative(sendEnvelope("openLink", { url: href })); return; } }} /> : <MindMapOutline root={root} docId={props.docId} readOnly={props.readOnly} selected={selected} restore={restore}
       scroll={doc.views.outlineScroll} onScroll={top => { doc.views.outlineScroll = top; if (!props.readOnly) { store.revision++; schedule(); } }} select={select} content={content} active={onActive} onKey={onKey} image={upload} blur={() => { store.boundary(); void flush(); }} action={action} focus={focus} move={move} />}
     {mode === "map" && anchor?.isConnected && editNode && (anchor as HTMLElement & { nodeObj: NodeObj }).nodeObj.id === editNode.id && createPortal(<div className="mindmap-node-edit-content" onPointerDown={event => event.stopPropagation()}>
-      <RichEditor id={editNode.id} content={editNode.content} docId={props.docId} readOnly={props.readOnly} label="节点正文" onChange={(value, before, after) => content(editNode.id, value, before, after)} onActive={onActive} onBlur={() => { store.boundary(); void flush(); }} onKey={(view, event) => onKey(editNode.id, view, event)} onImage={upload} onResize={resize} restore={restore} />
+      <RichEditor id={editNode.id} content={editNode.content} docId={props.docId} readOnly={props.readOnly} label="节点正文" onChange={(value, before, after) => content(editNode.id, value, before, after)} onActive={onActive} onBlur={() => { store.boundary(); void flush(); }} onKey={(view, event) => onKey(editNode.id, view, event)} onImage={upload} onResize={() => resize(editing ?? undefined)} restore={restore} />
     </div>, anchor)}
     {(selected.length > 0 || active) && <NodeToolbar getEditor={ensureEditor} active={active} action={action} focusNode={() => focus(selectedId)} image={upload} undo={() => undo()} redo={() => undo(true)} boundary={() => store.boundary()} readOnly={props.readOnly} />}
     {nodeMenu && !props.readOnly && <div className="mindmap-node-menu-backdrop" onPointerDown={event => { event.stopPropagation(); setNodeMenu(null); }}>

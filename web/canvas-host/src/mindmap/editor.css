@@ -25,6 +25,16 @@
 .siye-editor .mindmap-controls [role="tab"]{border:0;background:transparent;color:var(--siye-muted);padding:6px 14px}
 .siye-editor .mindmap-controls [role="tab"][aria-selected="true"]{background:var(--siye-bg);color:var(--siye-text);box-shadow:0 1px 3px #00000014}
 
+/* A compact top edge leaves more room for the desktop document. */
+@media (hover: hover) and (pointer: fine) {
+  .siye-editor:before{height:40px}
+  .siye-editor .mindmap-controls{top:0}
+  .siye-editor .mindmap-controls[role="tablist"]{border-top:0;border-top-left-radius:0;border-top-right-radius:0}
+  .siye-editor .mindmap-breadcrumbs,.siye-editor .mindmap-save-status{top:12px}
+  .siye-editor .mind-elixir-toolbar.lt{top:48px}
+  .siye-editor .mindmap-outline-document{padding-top:64px}
+}
+
 .siye-editor .context-menu .menu-list{padding:5px;min-width:210px;border:1px solid var(--siye-line);border-radius:10px;color:var(--siye-text);background:var(--siye-bg);box-shadow:0 10px 30px #00000026;font-size:13px}
 .siye-editor .context-menu .menu-list li{min-width:200px;padding:6px 10px;border:0;border-radius:5px;background:transparent;color:inherit}
 .siye-editor .context-menu .menu-list li:hover{filter:none;background:var(--siye-pale)}

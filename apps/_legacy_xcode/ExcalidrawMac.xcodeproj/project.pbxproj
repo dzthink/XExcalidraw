@@ -262,7 +262,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ -x \\\"$SRCROOT/../../scripts/build_web.sh\\\" ]; then\n  \\\"$SRCROOT/../../scripts/build_web.sh\\\"\nfi\n";
+			shellScript = "if [ -x \"$SRCROOT/../../scripts/build_web.sh\" ]; then\n  \"$SRCROOT/../../scripts/build_web.sh\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -377,6 +377,7 @@ CODE_SIGNING_ALLOWED = YES;
 				ARCHS = arm64;
 				ONLY_ACTIVE_ARCH = YES;
 				SWIFT_VERSION = 5.9;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
 			};
 			name = Debug;
 		};

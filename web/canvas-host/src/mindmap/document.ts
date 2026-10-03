@@ -98,35 +98,80 @@ export function parseDocument(data: unknown): MapDocument | null {
 }
 
 // One history for both views. Input from one field forms a group until focus or structure changes.
+type HistoryEntry = { cursor: Cursor | null; selectedIds: string[]; bytes: number } & (
+  { kind: "document"; doc: MapDocument } | { kind: "content"; id: string; content: RichDocument }
+);
+const HISTORY_BYTES = 16 * 1024 * 1024;
 export class DocumentStore {
   document: MapDocument;
   cursor: Cursor | null = null;
-  private past: { doc: MapDocument; cursor: Cursor | null }[] = [];
-  private future: { doc: MapDocument; cursor: Cursor | null }[] = [];
+  private past: HistoryEntry[] = [];
+  private future: HistoryEntry[] = [];
   private group: string | null = null;
   private lastChange = 0;
   revision = 0;
+  structureRevision = 0;
+  private nodes = new Map<string, MapNode>();
+  private indexedRevision = -1;
   constructor(document: MapDocument) { this.document = copy(document); }
+  node(id: string) {
+    if (this.indexedRevision !== this.structureRevision) {
+      this.nodes.clear();
+      const visit = (node: MapNode) => { this.nodes.set(node.id, node); node.children.forEach(visit); };
+      visit(this.document.nodeData); this.indexedRevision = this.structureRevision;
+    }
+    return this.nodes.get(id) ?? null;
+  }
+  private push(to: HistoryEntry[], entry: HistoryEntry) {
+    to.push(entry);
+    let bytes = to.reduce((sum, item) => sum + item.bytes, 0);
+    while (to.length > 1 && (to.length > 200 || bytes > HISTORY_BYTES)) bytes -= to.shift()!.bytes;
+  }
+  private metadata() { return { cursor: this.cursor && { ...this.cursor }, selectedIds: [...this.document.views.selectedIds] }; }
+  private changed(group: string | null) {
+    this.group = group; this.lastChange = Date.now(); this.future = []; this.revision++;
+  }
   boundary() { this.group = null; }
+  // Rich text is a node-local history entry, even in a very large document.
+  changeContent(id: string, content: RichDocument, group = `content:${id}`) {
+    const node = this.node(id);
+    if (!node || JSON.stringify(node.content) === JSON.stringify(content)) return false;
+    const last = this.past[this.past.length - 1];
+    if (group !== this.group || Date.now() - this.lastChange > 1000 || last?.kind !== "content" || last.id !== id) {
+      const previous = copy(node.content);
+      this.push(this.past, { kind: "content", id, content: previous, ...this.metadata(), bytes: JSON.stringify(previous).length * 2 });
+    }
+    node.content = copy(content); this.changed(group); return true;
+  }
   change(mutate: (document: MapDocument) => void, group: string | null = null) {
     const before = copy(this.document);
     mutate(this.document);
+    this.indexedRevision = -1;
     if (JSON.stringify(before) === JSON.stringify(this.document)) return false;
-    if (!group || group !== this.group || Date.now() - this.lastChange > 1000) {
-      this.past.push({ doc: before, cursor: this.cursor && { ...this.cursor } });
-      if (this.past.length > 200) this.past.shift();
+    if (!group || group !== this.group || Date.now() - this.lastChange > 1000 || this.past[this.past.length - 1]?.kind !== "document") {
+      this.push(this.past, { kind: "document", doc: before, ...this.metadata(), selectedIds: [...before.views.selectedIds], bytes: JSON.stringify(before).length * 2 });
     }
-    this.group = group; this.lastChange = Date.now(); this.future = []; this.revision++;
+    this.structureRevision++; this.changed(group);
     return true;
   }
   undo() { return this.restore(this.past, this.future); }
   redo() { return this.restore(this.future, this.past); }
   private restore(from: typeof this.past, to: typeof this.past) {
     const snapshot = from.pop(); if (!snapshot) return false;
-    to.push({ doc: copy(this.document), cursor: this.cursor && { ...this.cursor } });
+    if (snapshot.kind === "content") {
+      const node = this.node(snapshot.id);
+      if (!node) { from.push(snapshot); return false; }
+      const content = copy(node.content);
+      this.push(to, { kind: "content", id: node.id, content, ...this.metadata(), bytes: JSON.stringify(content).length * 2 });
+      node.content = copy(snapshot.content);
+    } else {
+      const current = copy(this.document);
+      this.push(to, { kind: "document", doc: current, ...this.metadata(), bytes: JSON.stringify(current).length * 2 });
+      const views = this.document.views;
+      this.document = copy(snapshot.doc); this.document.views = { ...views }; this.structureRevision++;
+    }
     // Viewport position belongs to the view, not content undo.
-    const views = this.document.views;
-    this.document = copy(snapshot.doc); this.document.views = { ...views, selectedIds: snapshot.doc.views.selectedIds.length ? [...snapshot.doc.views.selectedIds] : snapshot.cursor ? [snapshot.cursor.id] : [] };
+    this.document.views.selectedIds = snapshot.selectedIds.length ? [...snapshot.selectedIds] : snapshot.cursor ? [snapshot.cursor.id] : [];
     this.cursor = snapshot.cursor; this.boundary(); this.revision++; return true;
   }
 }

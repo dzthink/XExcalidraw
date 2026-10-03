@@ -1,0 +1,80 @@
+{
+  "device": "iPhone 17",
+  "os": "iOS 26.6.2",
+  "commit": "533b258",
+  "configuration": "Debug with production web assets",
+  "instrument": "Animation Hitches",
+  "durationSeconds": 62.053554,
+  "traceStartOffsetFromLargeMapTestSeconds": 100.615,
+  "scope": "Late drag sequence, return, reopening and switching to outline. Does not cover typing or pinch gestures. Includes XCTest accessibility queries and profiling overhead.",
+  "animationHitches": [
+    {
+      "startSeconds": 59.235486333,
+      "durationMs": 100.017,
+      "classification": "Potentially expensive app update(s)"
+    }
+  ],
+  "mainThreadFlags": [
+    {
+      "startSeconds": 2.125410458,
+      "durationMs": 36.429042,
+      "classification": "Potential Interaction Delay"
+    },
+    {
+      "startSeconds": 9.34973375,
+      "durationMs": 37.243541,
+      "classification": "Potential Interaction Delay"
+    },
+    {
+      "startSeconds": 16.613234041,
+      "durationMs": 35.358459,
+      "classification": "Potential Interaction Delay"
+    },
+    {
+      "startSeconds": 23.764578,
+      "durationMs": 34.619458,
+      "classification": "Potential Interaction Delay"
+    },
+    {
+      "startSeconds": 39.781071375,
+      "durationMs": 68.746708,
+      "classification": "Potential Interaction Delay"
+    },
+    {
+      "startSeconds": 41.653523708,
+      "durationMs": 40.113417,
+      "classification": "Potential Interaction Delay"
+    },
+    {
+      "startSeconds": 42.077471833,
+      "durationMs": 137.481625,
+      "classification": "Brief Unresponsiveness"
+    },
+    {
+      "startSeconds": 44.161197833,
+      "durationMs": 43.001958,
+      "classification": "Potential Interaction Delay"
+    },
+    {
+      "startSeconds": 51.355643375,
+      "durationMs": 35.516,
+      "classification": "Potential Interaction Delay"
+    },
+    {
+      "startSeconds": 59.193115166,
+      "durationMs": 106.076125,
+      "classification": "Brief Unresponsiveness"
+    },
+    {
+      "startSeconds": 60.337183125,
+      "durationMs": 33.539125,
+      "classification": "Potential Interaction Delay"
+    }
+  ],
+  "limitations": [
+    "No Release comparison or pre-optimization device baseline.",
+    "No measured frame rate or dropped-frame percentage.",
+    "Time correlation does not establish the cause of a delay.",
+    "Earlier outline recording lasted only 1.307 seconds and is excluded."
+  ]
+}

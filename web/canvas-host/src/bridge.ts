@@ -54,81 +54,69 @@ function parseMessage(data: unknown): NativeToWebMessage | null {
   return null;
 }
 
-export function initializeBridge() {
-  window.addEventListener("message", (event) => {
-    const message = parseMessage(event.data);
-    if (!message || message.version !== BRIDGE_VERSION) {
-      return;
-    }
-    for (const listener of listeners) {
-      listener(message);
-    }
-  });
+let bridgeUsers = 0;
+let releaseBridge: (() => void) | null = null;
 
-  const webkit = window.webkit;
-  if (webkit?.messageHandlers?.bridge) {
-    (window as Window & { bridgeDispatch?: (data: string) => void })
-      .bridgeDispatch = (data) => {
-        const message = parseMessage(data);
-        if (!message || message.version !== BRIDGE_VERSION) {
-          return;
-        }
-        for (const listener of listeners) {
-          listener(message);
-        }
-      };
+/** Shared setup is reference counted so StrictMode and multiple consumers cannot duplicate listeners. */
+export function initializeBridge(): () => void {
+  if (bridgeUsers++ === 0) {
+    const dispatch = (data: unknown) => {
+      const message = parseMessage(data);
+      if (!message || message.version !== BRIDGE_VERSION) return;
+      for (const listener of listeners) listener(message);
+    };
+    const receive = (event: MessageEvent) => dispatch(event.data);
+    window.addEventListener("message", receive);
+    const nativeWindow = window as Window & { bridgeDispatch?: (data: string) => void };
+    const nativeDispatch = (data: string) => dispatch(data);
+    if (window.webkit?.messageHandlers?.bridge) nativeWindow.bridgeDispatch = nativeDispatch;
+    const stopCursor = initializeCursorTracking();
+    releaseBridge = () => {
+      window.removeEventListener("message", receive);
+      if (nativeWindow.bridgeDispatch === nativeDispatch) delete nativeWindow.bridgeDispatch;
+      stopCursor();
+    };
   }
-
-  // Monitor cursor changes and notify native layer
-  initializeCursorTracking();
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    if (--bridgeUsers === 0) { releaseBridge?.(); releaseBridge = null; }
+  };
 }
 
-function initializeCursorTracking() {
-  let lastCursor = "";
-
-  // Helper to get the current effective cursor
-  const getCurrentCursor = (): string => {
-    // Check the element under the mouse first
-    const hoveredElement = document.querySelector(".excalidraw canvas:hover") as HTMLElement | null;
-    if (hoveredElement) {
-      return getComputedStyle(hoveredElement).cursor;
-    }
-    // Check canvas element
-    const canvas = document.querySelector(".excalidraw canvas") as HTMLElement | null;
-    if (canvas) {
-      const cursor = getComputedStyle(canvas).cursor;
-      if (cursor && cursor !== "auto") {
-        return cursor;
+function initializeCursorTracking(): () => void {
+  // iOS uses UIKit's responder. Desktop needs updates only when a pointer or tool changes.
+  if (!window.webkit?.messageHandlers?.bridge || !window.matchMedia("(hover: hover) and (pointer: fine)").matches) return () => {};
+  let frame = 0, lastCursor = "", target: HTMLElement | null = null;
+  const update = () => {
+    frame = 0;
+    if (document.hidden || !target?.isConnected) return;
+    const cursor = getComputedStyle(target).cursor;
+    if (cursor !== lastCursor) { lastCursor = cursor; postToNative(sendEnvelope("cursorChanged", { cursor })); }
+  };
+  const schedule = () => { if (!frame && !document.hidden) frame = requestAnimationFrame(update); };
+  const targetObserver = new MutationObserver(schedule);
+  const move = (event: MouseEvent) => {
+    const next = event.target instanceof HTMLElement ? event.target : (event.target as Element | null)?.closest<HTMLElement>(".excalidraw") ?? null;
+    if (next !== target) {
+      targetObserver.disconnect(); target = next;
+      for (let element: HTMLElement | null = target; element; element = element.parentElement) {
+        targetObserver.observe(element, { attributes: true, attributeFilter: ["style", "class"] });
+        if (element.classList.contains("excalidraw") || element.classList.contains("siye-editor")) break;
       }
     }
-    // Check excalidraw container
-    const excalidraw = document.querySelector(".excalidraw") as HTMLElement | null;
-    if (excalidraw) {
-      return getComputedStyle(excalidraw).cursor;
-    }
-    // Default to body cursor
-    return getComputedStyle(document.body).cursor;
+    schedule();
   };
-
-  // Check cursor on mouse move
-  document.addEventListener("mousemove", () => {
-    const cursor = getCurrentCursor();
-    if (cursor !== lastCursor) {
-      lastCursor = cursor;
-      postToNative(
-        sendEnvelope("cursorChanged", { cursor })
-      );
-    }
-  }, { passive: true });
-
-  // Also check periodically to catch cursor changes from interactions
-  setInterval(() => {
-    const cursor = getCurrentCursor();
-    if (cursor !== lastCursor) {
-      lastCursor = cursor;
-      postToNative(
-        sendEnvelope("cursorChanged", { cursor })
-      );
-    }
-  }, 50);
+  document.addEventListener("mousemove", move, { passive: true });
+  document.addEventListener("pointerup", schedule, { passive: true });
+  document.addEventListener("keydown", schedule);
+  document.addEventListener("visibilitychange", schedule);
+  return () => {
+    cancelAnimationFrame(frame); targetObserver.disconnect();
+    document.removeEventListener("mousemove", move);
+    document.removeEventListener("pointerup", schedule);
+    document.removeEventListener("keydown", schedule);
+    document.removeEventListener("visibilitychange", schedule);
+  };
 }

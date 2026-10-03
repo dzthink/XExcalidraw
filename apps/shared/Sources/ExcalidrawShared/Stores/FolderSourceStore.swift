@@ -30,6 +30,8 @@ public final class FolderSourceStore: ObservableObject {
     private let aiEnabledKey = "aiEnabled"
     private var activeURLs: [UUID: URL] = [:]
     private let indexStore: ExcalidrawFileIndexStore
+    private var indexRevision = 0
+    private let indexWriter: IndexPersistenceWriter
     private let indexingQueue: DispatchQueue
     private let fileCoordinator = NSFileCoordinator()
     private var metadataQueries: [UUID: NSMetadataQuery] = [:]
@@ -47,6 +49,7 @@ public final class FolderSourceStore: ObservableObject {
     ) {
         self.userDefaults = userDefaults
         self.indexStore = indexStore
+        self.indexWriter = IndexPersistenceWriter(store: indexStore)
         self.indexingQueue = DispatchQueue(label: "com.xexcalidraw.folder-index", qos: .background)
         loadFromDefaults()
         loadActiveSourceId()
@@ -158,7 +161,7 @@ public final class FolderSourceStore: ObservableObject {
     public func refreshAllIndexes() {
         let sourcesSnapshot = sources
         guard !sourcesSnapshot.isEmpty else { return }
-        let existingEntries = indexedEntries
+        let revision = indexRevision
         indexingQueue.async { [weak self] in
             guard let self else { return }
             var aggregated: [ExcalidrawFileEntry] = []
@@ -169,7 +172,8 @@ public final class FolderSourceStore: ObservableObject {
                 }
             }
             DispatchQueue.main.async {
-                self.indexedEntries = self.mergeEntries(aggregated, existingEntries: existingEntries)
+                guard self.indexRevision == revision else { self.refreshAllIndexes(); return }
+                self.indexedEntries = self.mergeEntries(aggregated, existingEntries: self.indexedEntries)
                 self.persistIndexEntries()
             }
         }
@@ -222,11 +226,8 @@ public final class FolderSourceStore: ObservableObject {
     }
 
     private func persistIndexEntries() {
-        do {
-            try indexStore.saveEntries(indexedEntries)
-        } catch {
-            // Intentionally ignore persistence errors.
-        }
+        indexRevision += 1
+        indexWriter.schedule(indexedEntries)
     }
 
     private func restoreSecurityScopedAccess() {
@@ -285,10 +286,13 @@ public final class FolderSourceStore: ObservableObject {
 
     private func refreshIndex(for source: FolderSource) {
         guard let url = resolveURL(for: source) else { return }
+        let revision = indexRevision
         indexingQueue.async { [weak self] in
             guard let self else { return }
             let entries = (try? self.scanFolder(source: source, url: url)) ?? []
             DispatchQueue.main.async {
+                guard self.sources.contains(where: { $0.id == source.id }) else { return }
+                guard self.indexRevision == revision else { self.refreshIndex(for: source); return }
                 self.updateIndexEntries(folderId: source.id, entries: entries)
             }
         }
@@ -504,22 +508,19 @@ public final class FolderSourceStore: ObservableObject {
     }
 
     @discardableResult
-    public func updateEntryAfterSave(for fileURL: URL, date: Date = Date()) -> ExcalidrawFileEntry? {
+    public func updateEntryAfterSave(for fileURL: URL, date: Date = Date(), modifiedAt: Date? = nil, fileSize: Int? = nil) -> ExcalidrawFileEntry? {
         guard let index = indexedEntries.firstIndex(where: { $0.fileURL == fileURL }) else {
             return nil
         }
         let existing = indexedEntries[index]
-        let resourceValues = try? fileURL.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
-        let modifiedAt = resourceValues?.contentModificationDate ?? existing.modifiedAt
-        let fileSize = Int64(resourceValues?.fileSize ?? Int(existing.fileSize))
         let updated = ExcalidrawFileEntry(
             id: existing.id,
             folderId: existing.folderId,
             relativePath: existing.relativePath,
             fileName: existing.fileName,
             fileURL: existing.fileURL,
-            modifiedAt: modifiedAt,
-            fileSize: fileSize,
+            modifiedAt: modifiedAt ?? date,
+            fileSize: Int64(fileSize ?? Int(existing.fileSize)),
             lastOpenedAt: date,
             thumbnailPath: existing.thumbnailPath
         )
@@ -533,11 +534,12 @@ public final class FolderSourceStore: ObservableObject {
         for fileURL: URL,
         folderId: UUID,
         rootURL: URL,
-        lastOpenedAt: Date? = nil
+        lastOpenedAt: Date? = nil,
+        resourceValues suppliedValues: URLResourceValues? = nil
     ) -> ExcalidrawFileEntry? {
         let normalizedName = fileURL.lastPathComponent.lowercased()
         guard SiyeDocumentType(fileName: normalizedName) != nil else { return nil }
-        let resourceValues = try? fileURL.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey])
+        let resourceValues = suppliedValues ?? (try? fileURL.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey]))
         guard resourceValues?.isRegularFile ?? true else { return nil }
         let modifiedAt = resourceValues?.contentModificationDate ?? Date()
         let fileSize = Int64(resourceValues?.fileSize ?? 0)
