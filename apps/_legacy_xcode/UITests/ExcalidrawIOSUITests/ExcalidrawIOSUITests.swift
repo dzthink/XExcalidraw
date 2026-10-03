@@ -298,6 +298,7 @@ final class ExcalidrawIOSUITests: XCTestCase {
         let app = makeApplication()
         app.launchEnvironment["SIYE_UI_TEST_FIXTURE"] = "browser"
         app.launch()
+        XCTAssertTrue(app.staticTexts["Test Canvas"].firstMatch.waitForExistence(timeout: 15))
         let all = app.buttons["all-documents"]
         let search = app.textFields["browser-search"]
         XCTAssertTrue(all.waitForExistence(timeout: 15))
@@ -329,6 +330,7 @@ final class ExcalidrawIOSUITests: XCTestCase {
         let app = makeApplication()
         app.launchEnvironment["SIYE_UI_TEST_FIXTURE"] = "browser"
         app.launch()
+        XCTAssertTrue(app.staticTexts["Test Canvas"].firstMatch.waitForExistence(timeout: 15))
         XCTAssertTrue(app.buttons["browser-create"].waitForExistence(timeout: 15))
         app.buttons["browser-create"].tap()
         app.buttons["新建画布"].tap()
@@ -350,6 +352,7 @@ final class ExcalidrawIOSUITests: XCTestCase {
         let app = makeApplication()
         app.launchEnvironment["SIYE_UI_TEST_FIXTURE"] = "browser"
         app.launch()
+        XCTAssertTrue(app.staticTexts["Test Canvas"].firstMatch.waitForExistence(timeout: 15))
         XCTAssertTrue(app.staticTexts["Projects"].firstMatch.waitForExistence(timeout: 15))
         app.staticTexts["Projects"].firstMatch.tap()
         app.staticTexts["Nested"].firstMatch.tap()
