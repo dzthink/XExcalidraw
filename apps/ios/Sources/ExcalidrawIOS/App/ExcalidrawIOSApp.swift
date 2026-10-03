@@ -404,6 +404,8 @@ struct FolderListView: View {
     
     private var foldersSection: some View {
         Section {
+            foldersSectionHeader
+
             Button {
                 navigationPath.append(FolderDestination(folderPath: nil, folderName: "全部"))
             } label: {
@@ -411,8 +413,6 @@ struct FolderListView: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("all-documents")
-
-            foldersSectionHeader
 
             if isFoldersSectionExpanded || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 foldersList
@@ -847,7 +847,7 @@ struct FolderRowPlain: View {
     }
     
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 0) {
             // 层级缩进
             HStack(spacing: 0) {
                 ForEach(0..<level, id: \.self) { _ in
@@ -872,26 +872,27 @@ struct FolderRowPlain: View {
                     .frame(width: 20)
             }
             
-            Image(systemName: "folder")
-                .font(.title3)
-                .foregroundStyle(.secondary)
-                .frame(width: 32, height: 40)
-            
-            Text(name)
-                .font(.body)
-                .lineLimit(1)
-            
-            Spacer()
-            
-            Text("\(count)")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+            HStack(spacing: 12) {
+                Image(systemName: "folder")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 32, height: 40)
+
+                Text(name)
+                    .font(.body)
+                    .lineLimit(1)
+
+                Spacer()
+
+                Text("\(count)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
         }
-        .padding(.vertical, 12)
         .contentShape(Rectangle())
     }
 }
