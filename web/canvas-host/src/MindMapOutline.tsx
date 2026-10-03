@@ -35,7 +35,7 @@ export default function MindMapOutline(props: OutlineProps) {
   const editor = (node: MapNode) => <RichEditor id={node.id} content={node.content} docId={props.docId} readOnly={props.readOnly}
     label={node === props.root ? "文档标题" : "节点正文"} onChange={(content, before, after) => props.content(node.id, content, before, after)}
     onActive={props.active} onBlur={props.blur} onKey={(view, event) => props.onKey(node.id, view, event)} onImage={props.image} onResize={() => {}} restore={props.restore} />;
-  const row = (node: MapNode) => <div className="outline-item" key={node.id}>
+  const row = (node: MapNode) => <div className={`outline-item ${node.expanded && node.children.length > 0 ? "has-children" : ""}`} key={node.id}>
     <div className={`outline-row ${props.selected.includes(node.id) ? "is-selected" : ""} ${drop?.id === node.id ? `drop-${drop.position}` : ""}`} data-outline-id={node.id}
       onClick={event => { if (event.shiftKey) { event.preventDefault(); props.select(node.id, true); } }}
       onDragOver={event => { if (props.readOnly || !event.dataTransfer.types.includes("application/x-siye-node")) return; event.preventDefault(); const box = event.currentTarget.getBoundingClientRect(); const y = (event.clientY - box.top) / box.height; setDrop({ id: node.id, position: y < .25 ? "before" : y > .75 ? "after" : "inside" }); }}
