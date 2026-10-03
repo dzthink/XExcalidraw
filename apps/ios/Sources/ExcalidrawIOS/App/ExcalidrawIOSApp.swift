@@ -150,6 +150,7 @@ private final class CanvasSession: ObservableObject {
 }
 
 struct ContentView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @StateObject private var session = CanvasSession()
     private var documentManager: DocumentManager { session.documentManager }
     private var viewModel: WebCanvasViewModel { session.viewModel }
@@ -168,8 +169,12 @@ struct ContentView: View {
             }
         }
         .onAppear {
+            viewModel.setPreferredTheme(colorScheme)
             viewModel.prewarm()
             restoreLastOpenedFile()
+        }
+        .onChange(of: colorScheme) { _, newColorScheme in
+            viewModel.setPreferredTheme(newColorScheme)
         }
         .onChange(of: documentManager.pendingDraft) { _, draft in
             guard let draft else { return }
@@ -2129,6 +2134,7 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
     private let aiModule: AIModule
     private let schemeHandler = BundleResourceSchemeHandler()
     private var pendingScenePayload: [String: Any]?
+    private var preferredTheme = "light"
 
     private var isAIEnabled: Bool {
         if UserDefaults.standard.object(forKey: aiEnabledKey) == nil {
@@ -2165,6 +2171,11 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
         guard !didStartLoading else { return }
         didStartLoading = true
         isCanvasReady = false
+        webView.configuration.userContentController.addUserScript(WKUserScript(
+            source: "window.__XEXCALIDRAW_THEME = \(preferredTheme.debugDescription);",
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
         
         if Bundle.main.url(forResource: "index", withExtension: "html") != nil,
            let bundleURL = URL(string: "app:///index.html") {
@@ -2208,6 +2219,7 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
             isCanvasReady = true
             isBridgeReady = true
             flushPendingSceneIfNeeded()
+            sendThemeUpdate()
             sendAIConfig()
         } else if type == "exportResult" {
             handleExport(payload: payload)
@@ -2411,6 +2423,17 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
         send(type: "export", payload: ["format": format])
     }
 
+    func setPreferredTheme(_ colorScheme: ColorScheme) {
+        preferredTheme = colorScheme == .dark ? "dark" : "light"
+        webView.overrideUserInterfaceStyle = colorScheme == .dark ? .dark : .light
+        sendThemeUpdate()
+    }
+
+    private func sendThemeUpdate() {
+        guard isBridgeReady else { return }
+        send(type: "setAppState", payload: ["theme": preferredTheme])
+    }
+
     private func queueScenePayload(_ payload: [String: Any]) {
         pendingScenePayload = payload
         flushPendingSceneIfNeeded()
@@ -2464,6 +2487,9 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
                   let jsonString = String(data: data, encoding: .utf8) else { return }
             let js = "window.bridgeDispatch && window.bridgeDispatch(\(jsonString.debugDescription))"
             DispatchQueue.main.async { self?.webView.evaluateJavaScript(js, completionHandler: nil) }
+        }
+        if type == "loadScene" {
+            sendThemeUpdate()
         }
     }
 

@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 final class ExcalidrawIOSUITests: XCTestCase {
     override func setUpWithError() throws {
@@ -38,6 +39,78 @@ final class ExcalidrawIOSUITests: XCTestCase {
         attachScreenshot(app, name: "Settings")
         app.buttons["完成"].tap()
         XCTAssertTrue(app.staticTexts["Test Canvas"].firstMatch.waitForExistence(timeout: 10))
+    }
+
+    func testCanvasAndMindMapFollowAppearanceChanges() {
+        let app = makeApplication()
+        app.launchEnvironment["SIYE_UI_TEST_FIXTURE"] = "documents"
+        app.launch()
+        for (appearance, isLight) in [("深色", false), ("浅色", true), ("深色", false)] {
+            XCTAssertTrue(app.buttons["设置"].waitForExistence(timeout: 15))
+            app.buttons["设置"].tap()
+            let option = app.segmentedControls.buttons[appearance]
+            XCTAssertTrue(option.waitForExistence(timeout: 10))
+            option.tap()
+            app.buttons["完成"].tap()
+            assertEditorBackgrounds(app, isLight: isLight)
+        }
+    }
+
+    func testCanvasAndMindMapStartWithLightAppearance() {
+        let app = makeApplication()
+        app.launchEnvironment["SIYE_UI_TEST_FIXTURE"] = "documents"
+        app.launchArguments = ["-siye.appearance", "light"]
+        app.launch()
+        assertEditorBackgrounds(app, isLight: true)
+    }
+
+    private func assertEditorBackgrounds(_ app: XCUIApplication, isLight: Bool) {
+        for name in ["Test Canvas", "Test Mind Map"] {
+            let file = app.staticTexts[name].firstMatch
+            XCTAssertTrue(file.waitForExistence(timeout: 15))
+            file.tap()
+            let editor = app.webViews["editor-ready"]
+            XCTAssertTrue(editor.waitForExistence(timeout: 30))
+            if name == "Test Mind Map" {
+                XCTAssertTrue(editor.staticTexts["中心主题"].firstMatch.waitForExistence(timeout: 10))
+                for mode in ["大纲", "思维导图"] {
+                    editor.buttons[mode].tap()
+                    assertEditorBackground(app, editor: editor, name: "\(name) \(mode)", isLight: isLight)
+                }
+            } else {
+                assertEditorBackground(app, editor: editor, name: name, isLight: isLight)
+            }
+            app.buttons["返回"].tap()
+        }
+    }
+
+    private func assertEditorBackground(_ app: XCUIApplication, editor: XCUIElement, name: String, isLight: Bool) {
+        let backgroundMatches = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            guard let brightness = self.backgroundBrightness(editor.screenshot()) else { return false }
+            return isLight ? brightness > 0.7 : brightness < 0.35
+        }, object: editor)
+        XCTAssertEqual(XCTWaiter.wait(for: [backgroundMatches], timeout: 10), .completed,
+                       "\(name) must follow the \(isLight ? "light" : "dark") appearance")
+        attachScreenshot(app, name: "\(name) \(isLight ? "light" : "dark")")
+    }
+
+    private func backgroundBrightness(_ screenshot: XCUIScreenshot) -> Double? {
+        guard let image = UIImage(data: screenshot.pngRepresentation)?.cgImage,
+              let sample = image.cropping(to: CGRect(x: Double(image.width) * 0.85,
+                                                     y: Double(image.height) * 0.75,
+                                                     width: 5, height: 5)) else { return nil }
+        // Sample empty editor space, away from native navigation and editor controls.
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let rendered = pixel.withUnsafeMutableBytes { bytes -> Bool in
+            guard let context = CGContext(data: bytes.baseAddress, width: 1, height: 1,
+                                          bitsPerComponent: 8, bytesPerRow: 4,
+                                          space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.draw(sample, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+            return true
+        }
+        guard rendered else { return nil }
+        return (Double(pixel[0]) + Double(pixel[1]) + Double(pixel[2])) / (3 * 255)
     }
 
     func testMindMapListStylesAboveKeyboard() {
