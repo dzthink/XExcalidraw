@@ -28,7 +28,7 @@ export type AppStateUpdate = Pick<AppState, AppStateUpdateKeys>;
 export type SetAppStatePayload = Partial<AppStateUpdate>;
 
 export type RequestExportPayload = {
-  format: "png" | "svg" | "json";
+  format: "png" | "svg" | "json" | "html" | "mindmap" | "xmind" | "mm" | "opml";
   embedScene: boolean;
 };
 
@@ -57,7 +57,7 @@ export type WebReadyPayload = {
 };
 
 export type ExportResultPayload = {
-  format: "png" | "svg" | "json";
+  format: "png" | "svg" | "json" | "html" | "mindmap" | "xmind" | "mm" | "opml";
   dataBase64: string;
 };
 
@@ -93,6 +93,7 @@ export type NativeToWebMessage =
   | BridgeEnvelope<AttachmentSaveFailedPayload>;
 
 export type WebToNativeMessage =
+  | BridgeEnvelope<NodeInteractionStatePayload>
   | BridgeEnvelope<DesktopToolbarStatePayload>
   | BridgeEnvelope<Record<string, unknown>>
   | BridgeEnvelope<DidChangePayload>
@@ -106,6 +107,13 @@ export type WebToNativeMessage =
 export type DesktopToolbarActionPayload = {
   action: "tool" | "lock" | "library" | "view";
   value?: string;
+};
+
+export type NodeInteractionStatePayload = {
+  docId: string;
+  viewMode: "outline" | "map";
+  editingId: string | null;
+  readOnly: boolean;
 };
 
 export type DesktopToolbarStatePayload = {

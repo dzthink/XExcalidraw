@@ -1,8 +1,8 @@
-import { wrapInList } from "prosemirror-schema-list";
+import { wrapInList, splitListItem } from "prosemirror-schema-list";
 import type { Command } from "prosemirror-state";
 import { schema } from "./richText";
 
-export function setList(style: "bullet" | "ordered" | "dash"): Command {
+export function setList(style: "bullet" | "ordered" | "task"): Command {
   return (state, dispatch, view) => {
     const type = style === "ordered" ? schema.nodes.ordered_list : schema.nodes.bullet_list;
     const attrs = style === "ordered" ? { order: 1 } : { marker: style };
@@ -33,3 +33,17 @@ export function setList(style: "bullet" | "ordered" | "dash"): Command {
     return true;
   };
 }
+
+// ProseMirror applies itemAttrs only at the end of a paragraph. Reset the
+// new item's completion explicitly when Return splits within existing text.
+export const splitUnfinishedListItem: Command = (state, dispatch, view) =>
+  splitListItem(schema.nodes.list_item, { checked: false })(state, dispatch && (tr => {
+    const { $from } = tr.selection;
+    for (let depth = $from.depth; depth > 0; depth--) {
+      const node = $from.node(depth);
+      if (node.type !== schema.nodes.list_item) continue;
+      if (node.attrs.checked) tr.setNodeMarkup($from.before(depth), undefined, { ...node.attrs, checked: false });
+      break;
+    }
+    dispatch(tr);
+  }), view);

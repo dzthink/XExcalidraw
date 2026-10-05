@@ -1,10 +1,15 @@
 import type { ReactNode } from "react";
 
 const paths = {
+  textStyle: "M3 19 9 5l6 14M5 14h8M17 10h4v9m0-5h-2a2 2 0 0 0 0 4h2",
+  image: "M3 3h18v18H3V3Zm0 13 6-6 8 11m-3-4 3-4 4 5M16 7h.01",
+  undo: "M8 4 3 9l5 5M3 9h11a6 6 0 0 1 0 12",
+  redo: "M16 4l5 5-5 5M21 9H10a6 6 0 0 0 0 12",
+  more: "M5 12h.01M12 12h.01M19 12h.01",
   quote: "M10 7H5v6h5V7Zm9 0h-5v6h5V7ZM10 13c0 4-2 5-5 5m14-5c0 4-2 5-5 5",
   bullet: "M9 6h12M9 12h12M9 18h12M3 6h.01M3 12h.01M3 18h.01",
   ordered: "M10 6h11M10 12h11M10 18h11M3 3h1v5M3 8h3M3 11c3-2 4 1 1 3l-1 1h3M3 18h2l-1 2c3 0 2 3-1 2",
-  dash: "M10 6h11M10 12h11M10 18h11M3 6h3M3 12h3M3 18h3",
+  task: "M10 6h11M10 12h11M10 18h11M2 4h5v5H2V4Zm0 11h5v5H2v-5M3 6l1 1 2-2",
   outdent: "M10 5h11M10 10h11M10 15h11M3 20h18M6 7l-3 3 3 3",
   indent: "M10 5h11M10 10h11M10 15h11M3 20h18M3 7l3 3-3 3",
   inlineCode: "M8 7l-5 5 5 5m8-10 5 5-5 5m-3-13-2 16",

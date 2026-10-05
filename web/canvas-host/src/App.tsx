@@ -1,3 +1,6 @@
+import { exportFreeMind, exportOPML, exportXMind, htmlPage } from "./mindmap/interchange";
+import { exportHTML } from "./mindmap/htmlExport";
+import type { MapDocument } from "./mindmap/document";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Excalidraw,
@@ -294,79 +297,95 @@ export default function App() {
         api.updateScene({ appState: appStateUpdate });
       }
       if (message.type === "requestExport") {
-        const map = mindMapApi.current;
-        if (map || mindMapDocument.current) {
-          const payload = message.payload as RequestExportPayload;
-          const blob = payload.format === "json"
-            ? new Blob([JSON.stringify(mindMapDocument.current?.() ?? map?.getData())], { type: "application/json" })
-            : await window.siyeExport?.(payload.format === "svg" ? "svg" : "png");
-          if (blob) {
-            const bytes = new Uint8Array(await blob.arrayBuffer());
-            let binary = "";
-            bytes.forEach(byte => { binary += String.fromCharCode(byte); });
-            sendToNative(sendEnvelope("exportResult", { format: payload.format, dataBase64: btoa(binary) }));
+        try {
+          const map = mindMapApi.current;
+          if (map || mindMapDocument.current) {
+            const payload = message.payload as RequestExportPayload;
+            const doc = mindMapDocument.current?.() as MapDocument | undefined;
+            let blob: Blob | null | undefined;
+            if (payload.format === "json" || payload.format === "mindmap") blob = new Blob([JSON.stringify(doc ?? map?.getData())], { type: "application/json" });
+            else if (payload.format === "html" && doc) {
+              const svg = await window.siyeExport?.("svg");
+              if (!svg) throw new Error("无法导出思维导图视图");
+              blob = new Blob([await exportHTML(doc, loadState.docId, await svg.text())], { type: "text/html" });
+            }
+            else if (payload.format === "mm" && doc) blob = new Blob([exportFreeMind(doc)], { type: "application/xml" });
+            else if (payload.format === "opml" && doc) blob = new Blob([exportOPML(doc)], { type: "application/xml" });
+            else if (payload.format === "xmind" && doc) blob = new Blob([exportXMind(doc).buffer as ArrayBuffer], { type: "application/zip" });
+            else if (payload.format === "png" || payload.format === "svg") blob = await window.siyeExport?.(payload.format);
+            if (!blob) throw new Error("无法导出此格式");
+            if (blob) {
+              const bytes = new Uint8Array(await blob.arrayBuffer());
+              let binary = "";
+              bytes.forEach(byte => { binary += String.fromCharCode(byte); });
+              sendToNative(sendEnvelope("exportResult", { format: payload.format, dataBase64: btoa(binary) }));
+            }
+            return;
           }
-          return;
-        }
-        const api = excalidrawApi.current;
-        if (!api) {
-          return;
-        }
-        const payload = message.payload as RequestExportPayload;
-        const elements = api.getSceneElements();
-        const appState = api.getAppState();
-        if (payload.format === "json") {
-          const data = btoa(
-            unescape(
-              encodeURIComponent(JSON.stringify({ elements, appState }))
-            )
-          );
-          sendToNative(
-            sendEnvelope("exportResult", {
-              format: payload.format,
-              dataBase64: data
-            })
-          );
-          return;
-        }
+          const api = excalidrawApi.current;
+          if (!api) {
+            return;
+          }
+          const payload = message.payload as RequestExportPayload;
+          const elements = api.getSceneElements();
+          const appState = api.getAppState();
+          if (payload.format === "json") {
+            const data = btoa(
+              unescape(
+                encodeURIComponent(JSON.stringify({ type: "excalidraw", version: 2, elements, appState, files: api.getFiles() }))
+              )
+            );
+            sendToNative(
+              sendEnvelope("exportResult", {
+                format: payload.format,
+                dataBase64: data
+              })
+            );
+            return;
+          }
 
-        if (payload.format === "svg") {
-          const svg = await exportToSvg({
-            elements,
-            appState,
-            embedScene: payload.embedScene
-          });
-          const svgString = new XMLSerializer().serializeToString(svg);
-          const data = btoa(unescape(encodeURIComponent(svgString)));
-          sendToNative(
-            sendEnvelope("exportResult", {
-              format: payload.format,
-              dataBase64: data
-            })
-          );
-          return;
-        }
+          if (payload.format === "svg" || payload.format === "html") {
+            const svg = await exportToSvg({
+              elements,
+              appState,
+              files: api.getFiles(),
+              embedScene: payload.embedScene
+            });
+            const svgString = new XMLSerializer().serializeToString(svg);
+            const data = btoa(unescape(encodeURIComponent(payload.format === "html" ? htmlPage("画布", svgString) : svgString)));
+            sendToNative(
+              sendEnvelope("exportResult", {
+                format: payload.format,
+                dataBase64: data
+              })
+            );
+            return;
+          }
 
-        if (payload.format === "png") {
-          const blob = await exportToBlob({
-            elements,
-            appState,
-            embedScene: payload.embedScene,
-            mimeType: "image/png"
-          });
-          const arrayBuffer = await blob.arrayBuffer();
-          const bytes = new Uint8Array(arrayBuffer);
-          let binary = "";
-          bytes.forEach((byte) => {
-            binary += String.fromCharCode(byte);
-          });
-          const data = btoa(binary);
-          sendToNative(
-            sendEnvelope("exportResult", {
-              format: payload.format,
-              dataBase64: data
-            })
-          );
+          if (payload.format === "png") {
+            const blob = await exportToBlob({
+              elements,
+              appState,
+              embedScene: payload.embedScene,
+              files: api.getFiles(),
+              mimeType: "image/png"
+            });
+            const arrayBuffer = await blob.arrayBuffer();
+            const bytes = new Uint8Array(arrayBuffer);
+            let binary = "";
+            bytes.forEach((byte) => {
+              binary += String.fromCharCode(byte);
+            });
+            const data = btoa(binary);
+            sendToNative(
+              sendEnvelope("exportResult", {
+                format: payload.format,
+                dataBase64: data
+              })
+            );
+          }
+        } catch (error) {
+          sendToNative(sendEnvelope("exportFailed", { error: error instanceof Error ? error.message : "导出失败" }));
         }
       }
     },

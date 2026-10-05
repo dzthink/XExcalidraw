@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { setBlockType, toggleMark } from "prosemirror-commands";
-import { liftListItem } from "prosemirror-schema-list";
+import { liftListItem, sinkListItem } from "prosemirror-schema-list";
 import { AllSelection, NodeSelection, type Command } from "prosemirror-state";
 import { addRowAfter, addColumnAfter, deleteRow, deleteColumn, deleteTable, isInTable } from "prosemirror-tables";
 import type { EditorView } from "prosemirror-view";
@@ -88,7 +88,14 @@ export default function NodeToolbar(props: Props) {
       window.removeEventListener("siye-node-toolbar-image", image);
     };
   });
-  const button = (label: string, action: () => void, display = label) => <button key={label} type="button" aria-label={label} title={label} onClick={action}>{display}</button>;
+  const primaryPanels = { "文字样式": "style", "表格": "table", "列表": "list", "代码": "code", "链接": "link", "节点操作": "more" } as const;
+  const button = (label: string, action: () => void, icon?: ToolbarIconName) => {
+    const targetPanel = primaryPanels[label as keyof typeof primaryPanels];
+    return <button key={label} type="button" aria-label={label} title={label}
+      aria-expanded={targetPanel ? panel === targetPanel : undefined} onClick={action}>
+      {icon ? <ToolbarIcon name={icon} /> : label}
+    </button>;
+  };
   const iconButton = (label: string, icon: ToolbarIconName, action: () => void, options: { pressed?: boolean; destructive?: boolean; primary?: boolean } = {}) => (
     <button key={label} type="button" className={`mindmap-panel-action${options.destructive ? " is-destructive" : ""}${options.primary ? " is-primary" : ""}`}
       aria-label={label} title={label} aria-pressed={options.pressed} onClick={action}>
@@ -115,18 +122,18 @@ export default function NodeToolbar(props: Props) {
     onPointerDown={event => { event.stopPropagation(); if ((event.target as HTMLElement).closest("button")) event.preventDefault(); }}>
     <div className="mindmap-toolbar-actions">
     {!props.readOnly && <>
-      {button("文字样式", () => toggle("style"), "Aa")}
-      {button("表格", () => toggle("table"), "▦")}
-      {button("列表", () => toggle("list"), "☷")}
-      <label className="mindmap-image-picker" title="插入图片">图片<input type="file" accept="image/png,image/jpeg,image/gif,image/webp" aria-label="插入图片" onChange={async event => {
+      {button("文字样式", () => toggle("style"), "textStyle")}
+      {button("表格", () => toggle("table"), "table")}
+      {button("列表", () => toggle("list"), "bullet")}
+      <label className="mindmap-image-picker" title="插入图片"><ToolbarIcon name="image" /><input type="file" accept="image/png,image/jpeg,image/gif,image/webp" aria-label="插入图片" onChange={async event => {
         const file = event.target.files?.[0]; event.target.value = "";
         const handle = await props.getEditor(); if (file && handle) props.image(file, handle.view);
       }} /></label>
-      {button("代码", () => toggle("code"), "</>")}
-      {button("链接", () => { void openLink(); }, "↗")}
+      {button("代码", () => toggle("code"), "inlineCode")}
+      {button("链接", () => { void openLink(); }, "link")}
       <span className="mindmap-toolbar-separator" />
-      {button("撤销", props.undo, "↶")}{button("重做", props.redo, "↷")}
-      {!isIOS && button("节点操作", () => toggle("more"), "···")}
+      {button("撤销", props.undo, "undo")}{button("重做", props.redo, "redo")}
+      {!isIOS && button("节点操作", () => toggle("more"), "more")}
     </>}
     {props.readOnly && button("进入此节点", props.focusNode)}
     </div>
@@ -148,14 +155,15 @@ export default function NodeToolbar(props: Props) {
             {iconButton("斜体", "italic", () => { void run(toggleMark(schema.marks.italic), true); }, { pressed: markActive("italic") })}
             {iconButton("删除线", "strike", () => { void run(toggleMark(schema.marks.strike), true); }, { pressed: markActive("strike") })}
             {iconButton("引用", "quote", () => { void run(toggleQuote); }, { pressed: blockActive("blockquote") })}
+            {iconButton("减少缩进", "outdent", () => { void run(liftListItem(schema.nodes.list_item)); })}
+            {iconButton("增加缩进", "indent", () => { void run(sinkListItem(schema.nodes.list_item)); })}
           </div>
         </div>
       </>}
       {panel === "list" && <div className="mindmap-panel-grid">
         {iconButton("无序列表", "bullet", () => { void run(setList("bullet")); }, { pressed: blockActive("bullet_list", undefined, "bullet") })}
         {iconButton("有序列表", "ordered", () => { void run(setList("ordered")); }, { pressed: blockActive("ordered_list") })}
-        {iconButton("短横线列表", "dash", () => { void run(setList("dash")); }, { pressed: blockActive("bullet_list", undefined, "dash") })}
-        {iconButton("退出列表", "outdent", () => { void run(liftListItem(schema.nodes.list_item)); })}
+        {iconButton("待办列表", "task", () => { void run(setList("task")); }, { pressed: blockActive("bullet_list", undefined, "task") })}
       </div>}
       {panel === "code" && <div className="mindmap-panel-grid is-two-columns">
         {iconButton("行内代码", "inlineCode", () => { void run(toggleMark(schema.marks.code)); }, { pressed: markActive("code") })}
@@ -199,8 +207,6 @@ export default function NodeToolbar(props: Props) {
         <div className="mindmap-panel-grid">
           {iconButton("添加同级", "sibling", () => { props.action("sibling"); setPanel(null); })}
           {iconButton("添加子级", "child", () => { props.action("child"); setPanel(null); })}
-          {iconButton("增加缩进", "indent", () => { props.action("indent"); setPanel(null); })}
-          {iconButton("减少缩进", "outdent", () => { props.action("outdent"); setPanel(null); })}
         </div>
         <div className="mindmap-panel-footer">
           {iconButton("折叠或展开", "fold", () => { props.action("fold"); setPanel(null); })}

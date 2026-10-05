@@ -296,6 +296,14 @@ struct ContentView: View {
             }
         }
         .toolbar {
+            ToolbarItem(placement: .automatic) {
+                Button { openImportPicker() } label: { Label("导入", systemImage: "square.and.arrow.down") }
+                    .disabled(!documentManager.hasActiveSource)
+            }
+            ToolbarItem(placement: .automatic) {
+                DocumentExportMenu(mindMap: viewModel.editorKind == "mindmap") { viewModel.requestExport(format: $0) }
+                    .disabled(documentManager.currentEntry == nil || !viewModel.isCanvasReady)
+            }
             ToolbarItem(placement: .principal) {
                 DesktopEditorToolbar(viewModel: viewModel)
             }
@@ -310,6 +318,27 @@ struct ContentView: View {
                 .accessibilityIdentifier("sidebar-toggle-button")
                 .accessibilityLabel(splitViewVisibility == .detailOnly ? "Show navigation" : "Collapse navigation")
                 .help(splitViewVisibility == .detailOnly ? "Show navigation" : "Collapse navigation")
+            }
+        }
+    }
+
+    private func openImportPicker() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = DocumentTransferFormats.importTypes
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            let scoped = url.startAccessingSecurityScopedResource()
+            viewModel.flushEditing { success in
+                guard success else { if scoped { url.stopAccessingSecurityScopedResource() }; return }
+                documentManager.importScene(from: url) { result in
+                    if scoped { url.stopAccessingSecurityScopedResource() }
+                    switch result {
+                    case .success(let entry): selectedEntryId = entry.id; viewModel.open(entry: entry)
+                    case .failure(let error): viewModel.documentLoadError = "导入失败：" + error.localizedDescription
+                    }
+                }
             }
         }
     }
@@ -363,85 +392,87 @@ struct ContentView: View {
 
     @ViewBuilder
     private var sidebarView: some View {
-        let base = List {
-            if fileTreeRoots.isEmpty {
-                // 没有文件夹时的提示
-                Section {
-                    VStack(alignment: .center, spacing: 12) {
-                        Image(systemName: "externaldrive.badge.plus")
-                            .font(.system(size: 40))
-                            .foregroundStyle(.secondary)
-                        Text("Add a folder to start")
-                            .foregroundStyle(.secondary)
-                        Button("Add Folder") {
-                            openFolderPicker()
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 40)
-                }
-            } else {
-                // 显示所有根目录平铺
-                ForEach(fileTreeRoots) { root in
-                    RootFolderHeader(
-                        node: root,
-                        onCreateFile: { type in
-                            createFile(in: root, type: type)
-                        },
-                        onCreateFolder: {
-                            createFolder(in: root)
-                        },
-                        onDeleteFolder: {
-                            deleteFolderToTrash(root)
-                        },
-                        onRemove: {
-                            if let sourceId = root.sourceId {
-                                removeFolderFromSidebar(sourceId)
+        let base = ScrollView {
+            VStack(alignment: .leading, spacing: 2) {
+                if fileTreeRoots.isEmpty {
+                    // 没有文件夹时的提示
+                    Section {
+                        VStack(alignment: .center, spacing: 12) {
+                            Image(systemName: "externaldrive.badge.plus")
+                                .font(.system(size: 40))
+                                .foregroundStyle(.secondary)
+                            Text("Add a folder to start")
+                                .foregroundStyle(.secondary)
+                            Button("Add Folder") {
+                                openFolderPicker()
                             }
+                            .buttonStyle(.borderedProminent)
                         }
-                    )
-                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                    .listRowSeparator(.hidden)
-                    FileTreeContentView(
-                        node: root,
-                        selectedEntryId: $selectedEntryId,
-                        editingEntryId: $editingEntryId,
-                        editingFileName: $editingFileName,
-                        onSelectFile: { entry in
-                            viewModel.open(entry: entry)
-                        },
-                        onRename: { entry in
-                            renameEntry(entry)
-                        },
-                        onCommitRename: { entry, newName in
-                            performRename(entry: entry, newName: newName)
-                            editingEntryId = nil
-                            editingFileName = ""
-                        },
-                        onCancelRename: {
-                            editingEntryId = nil
-                            editingFileName = ""
-                        },
-                        onDelete: { entry in
-                            deleteEntry(entry)
-                        },
-                        onCreateFile: { node, type in
-                            createFile(in: node, type: type)
-                        },
-                        onCreateFolder: { node in
-                            createFolder(in: node)
-                        },
-                        onDeleteFolder: { node in
-                            deleteFolderToTrash(node)
-                        }
-                    )
-                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                    .listRowSeparator(.hidden)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 40)
+                    }
+                } else {
+                    // 显示所有根目录平铺
+                    ForEach(fileTreeRoots) { root in
+                        FolderRowView(
+                            node: root,
+                            level: 0,
+                            editingEntryId: $editingEntryId,
+                            editingFileName: $editingFileName,
+                            onCreateFile: { _, type in
+                                createFile(in: root, type: type)
+                            },
+                            onCreateFolder: { _ in
+                                createFolder(in: root)
+                            },
+                            onDeleteFolder: { _ in
+                                deleteFolderToTrash(root)
+                            },
+                            onRemove: {
+                                if let sourceId = root.sourceId {
+                                    removeFolderFromSidebar(sourceId)
+                                }
+                            }
+                        )
+                        FileTreeContentView(
+                            node: root,
+                            selectedEntryId: $selectedEntryId,
+                            editingEntryId: $editingEntryId,
+                            editingFileName: $editingFileName,
+                            onSelectFile: { entry in
+                                viewModel.open(entry: entry)
+                            },
+                            onRename: { entry in
+                                renameEntry(entry)
+                            },
+                            onCommitRename: { entry, newName in
+                                performRename(entry: entry, newName: newName)
+                                editingEntryId = nil
+                                editingFileName = ""
+                            },
+                            onCancelRename: {
+                                editingEntryId = nil
+                                editingFileName = ""
+                            },
+                            onDelete: { entry in
+                                deleteEntry(entry)
+                            },
+                            onCreateFile: { node, type in
+                                createFile(in: node, type: type)
+                            },
+                            onCreateFolder: { node in
+                                createFolder(in: node)
+                            },
+                            onDeleteFolder: { node in
+                                deleteFolderToTrash(node)
+                            }
+                        )
+                    }
                 }
             }
+            .padding(8)
         }
-        .listStyle(.sidebar)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.35))
         .accessibilityIdentifier("documents-sidebar")
         .navigationTitle("Documents")
         .toolbar {
@@ -491,96 +522,6 @@ enum SidebarBehavior {
     }
 }
 
-/// 根目录文件夹标题视图
-struct RootFolderHeader: View {
-    @ObservedObject var node: FileTreeNode
-    var onCreateFile: (SiyeDocumentType) -> Void
-    var onCreateFolder: () -> Void
-    var onDeleteFolder: () -> Void
-    var onRemove: () -> Void
-    
-    var body: some View {
-        HStack(spacing: 0) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    node.isExpanded.toggle()
-                }
-            } label: {
-                Image(systemName: node.isExpanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 20, height: 28)
-            }
-            .buttonStyle(.plain)
-
-            Button {
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    node.isExpanded.toggle()
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "externaldrive.fill")
-                        .foregroundStyle(.secondary)
-                        .font(.system(size: 14))
-                    
-                    Text(node.name)
-                        .font(.system(size: 13, weight: .semibold))
-                        .lineLimit(1)
-                    
-                    Spacer()
-                }
-                .foregroundStyle(.secondary)
-                .contentShape(Rectangle())
-                .padding(.vertical, 2)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.vertical, 1)
-        .contextMenu {
-            Button {
-                onCreateFile(.excalidraw)
-            } label: {
-                Label("New Drawing", systemImage: "scribble.variable")
-            }
-            Button {
-                onCreateFile(.mindmap)
-            } label: {
-                Label("New Mind Map", systemImage: "point.3.connected.trianglepath.dotted")
-            }
-
-            Button {
-                onCreateFolder()
-            } label: {
-                Label("Create Folder", systemImage: "folder.badge.plus")
-            }
-
-            Divider()
-
-            Button(role: .destructive) {
-                onDeleteFolder()
-            } label: {
-                Label("Delete Folder", systemImage: "trash")
-            }
-
-            Divider()
-
-            Button {
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    node.isExpanded.toggle()
-                }
-            } label: {
-                Label(node.isExpanded ? "Collapse" : "Expand", systemImage: node.isExpanded ? "chevron.up" : "chevron.down")
-            }
-
-            Button {
-                onRemove()
-            } label: {
-                Label("Remove from Sidebar", systemImage: "minus.circle")
-            }
-        }
-    }
-}
-
 // MARK: - WebCanvasViewModel
 
 final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
@@ -598,6 +539,12 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
     @Published var drawingToolLocked = false
     @Published var editorReadOnly = false
     let webView: WKWebView
+
+    func requestExport(format: String) {
+        flushEditing { [weak self] success in
+            if success { self?.send(type: "requestExport", payload: ["format": format, "embedScene": true]) }
+        }
+    }
 
     func performToolbarAction(_ action: String, value: String? = nil) {
         var payload: [String: Any] = ["action": action]
@@ -753,6 +700,8 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
                 self?.sendThemeUpdate()
             }
+        } else if type == "exportFailed" {
+            documentLoadError = "导出失败：" + (payload["error"] as? String ?? "未知错误")
         } else if type == "exportResult" {
             handleExport(payload: payload)
         } else if type == "requestAI" {
@@ -859,7 +808,7 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
 
         do {
             let exportDirectory = try resolveExportDirectory()
-            let fileName = makeExportFileName(extension: exportType.preferredFilenameExtension ?? format)
+            let fileName = makeExportFileName(extension: format)
             let fileURL = exportDirectory.appendingPathComponent(fileName)
             try exportData.write(to: fileURL, options: [.atomic])
             statusText = "Exported \(fileName)"
@@ -954,16 +903,7 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
     }
 
     private func exportType(for format: String) -> UTType? {
-        switch format.lowercased() {
-        case "png":
-            return .png
-        case "svg":
-            return .svg
-        case "json":
-            return .json
-        default:
-            return nil
-        }
+        DocumentTransferFormats.exportType(format)
     }
 
     private func presentSavePanel(

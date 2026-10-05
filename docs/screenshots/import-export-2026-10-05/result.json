@@ -1,0 +1,15 @@
+{
+  "formats" : [
+    "html",
+    "png",
+    "svg",
+    "mindmap",
+    "xmind",
+    "mm",
+    "opml"
+  ],
+  "htmlBytes" : 1378,
+  "offlineImage" : true,
+  "passed" : true,
+  "pngBytes" : 32704
+}

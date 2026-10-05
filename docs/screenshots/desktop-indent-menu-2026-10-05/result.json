@@ -1,0 +1,14 @@
+{
+  "checks" : [
+    "empty markers",
+    "completion toggle",
+    "unfinished Return",
+    "menu placement",
+    "indent\/outdent",
+    "HTML round trip",
+    "desktop light\/dark menu contrast",
+    "unified toolbar surfaces and button dimensions",
+    "expanded menu state"
+  ],
+  "passed" : true
+}

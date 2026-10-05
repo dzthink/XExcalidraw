@@ -13,6 +13,7 @@ export type OutlineProps = {
   scroll: number; onScroll: (top: number) => void; select: (id: string, multiple?: boolean) => void;
   content: (id: string, content: RichDocument, previous: Cursor, next: Cursor) => void;
   active: (handle: EditorHandle) => void; onKey: (id: string, view: EditorView, event: KeyboardEvent) => boolean;
+  onDoubleEnter: (id: string) => void;
   image: (file: File, view: EditorView) => void; blur: () => void;
   action: (action: StructureAction, ids?: string[]) => void; focus: (id: string) => void;
   move: (ids: string[], target: string, position: "before" | "after" | "inside") => void;
@@ -50,7 +51,7 @@ export default function MindMapOutline(props: OutlineProps) {
         if (position) handle.view.dispatch(handle.view.state.tr.setSelection(TextSelection.near(handle.view.state.doc.resolve(position.pos))));
       }
       props.active(handle);
-    }} onBlur={props.blur} onKey={(view, event) => props.onKey(node.id, view, event)} onImage={props.image} onResize={() => {}} restore={props.restore} /> :
+    }} onBlur={props.blur} onKey={(view, event) => props.onKey(node.id, view, event)} onDoubleEnter={() => props.onDoubleEnter(node.id)} onImage={props.image} onResize={() => {}} restore={props.restore} /> :
     <div data-editor-id={node.id} role="textbox" aria-label={node === props.root ? "文档标题" : "节点正文"} tabIndex={0}
       onClick={event => {
         const link = (event.target as HTMLElement).closest("a");

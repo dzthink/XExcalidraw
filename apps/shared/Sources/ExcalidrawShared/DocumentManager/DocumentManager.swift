@@ -165,8 +165,16 @@ public final class DocumentManager: ObservableObject {
             guard let self else { return }
             do {
                 let sceneJson = try self.loadImportScene(from: fileURL)
-                let targetName = self.makeImportDocumentName(from: fileURL) + (fileURL.pathExtension.lowercased() == "mindmap" ? ".mindmap" : "")
-                let targetURL = try self.resolveSaveURL(docId: targetName)
+                let isMindMap = (sceneJson as? [String: Any])?["nodeData"] != nil
+                let targetName = self.makeImportDocumentName(from: fileURL)
+                guard let folderURL = self.defaultFolderURL() else { throw DocumentManagerError.missingFolder }
+                let suffix = isMindMap ? ".mindmap" : ".excalidraw"
+                var targetURL = folderURL.appendingPathComponent(targetName + suffix)
+                var counter = 2
+                while FileManager.default.fileExists(atPath: targetURL.path) {
+                    targetURL = folderURL.appendingPathComponent("\(targetName)-\(counter)" + suffix)
+                    counter += 1
+                }
                 let jsonData = try JSONSerialization.data(withJSONObject: sceneJson, options: [.prettyPrinted])
                 try jsonData.write(to: targetURL, options: [.atomic])
                 DispatchQueue.main.async {
@@ -219,7 +227,10 @@ public final class DocumentManager: ObservableObject {
                 let values = try? targetURL.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
                 DispatchQueue.main.async {
                     if self.pendingDraft?.docId == docId { self.pendingDraft = nil }
-                    let entry = self.updateIndexAfterSave(fileURL: targetURL, modifiedAt: values?.contentModificationDate, fileSize: values?.fileSize, activate: self.currentEntry?.id == submittedEntryID)
+                    // A late WebView save must not activate its file over a newly created document.
+                    let submittedDocumentURL = submittedURL.map { self.renamedURL(for: $0.path) ?? $0 }
+                    let savesCurrentDocument = submittedDocumentURL == targetURL || (submittedURL == nil && !docId.hasPrefix("/"))
+                    let entry = self.updateIndexAfterSave(fileURL: targetURL, modifiedAt: values?.contentModificationDate, fileSize: values?.fileSize, activate: savesCurrentDocument && self.currentEntry?.id == submittedEntryID)
                     if let entry {
                         completion(.success(entry))
                     } else {
@@ -500,7 +511,16 @@ public final class DocumentManager: ObservableObject {
         let fileName = fileURL.lastPathComponent.lowercased()
         let fileExtension = fileURL.pathExtension.lowercased()
         let data = try Data(contentsOf: fileURL)
-        if fileExtension == "excalidraw" || fileExtension == "mindmap" {
+        if MindMapInterchange.extensions.contains(fileExtension) {
+            return try MindMapInterchange.decode(data, extension: fileExtension, title: makeImportDocumentName(from: fileURL))
+        }
+        if fileExtension == "json" {
+            guard let scene = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw DocumentManagerError.invalidImportData }
+            if scene["format"] as? String == "siye-mindmap" { return try MindMapInterchange.decode(data, extension: "mindmap", title: makeImportDocumentName(from: fileURL)) }
+            guard scene["elements"] is [Any], scene["appState"] is [String: Any] else { throw DocumentManagerError.invalidImportData }
+            return scene
+        }
+        if fileExtension == "excalidraw" {
             return try JSONSerialization.jsonObject(with: data)
         }
         if fileName.hasSuffix(".excalidraw.json") {

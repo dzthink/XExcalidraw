@@ -5,6 +5,62 @@ import { readContent, schema, safeLink, attachmentSource } from "../src/mindmap/
 import { EditorState, TextSelection } from "prosemirror-state";
 import { toggleMark } from "prosemirror-commands";
 import { addRowAfter, deleteColumn } from "prosemirror-tables";
+import { allowsNodeLongPress } from "../src/mindmap/nodeInteraction";
+import { DoubleEnter } from "../src/mindmap/doubleEnter";
+test("quick double Return restores text and cursor before creating a sibling", () => {
+  const gesture = new DoubleEnter();
+  let state = EditorState.create({ doc: readContent(plainContent("abcd")) });
+  state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 3)));
+  const original = state.doc;
+  let siblings = 0;
+  const dispatch = (tr: EditorState["tr"]) => { gesture.reset(); state = state.apply(tr); };
+  const enter = (time: number) => gesture.handle(() => state, dispatch, () => { siblings++; }, time);
+  assert.equal(enter(100), true);
+  assert.equal(state.doc.childCount, 2);
+  assert.equal(enter(400), true);
+  assert.equal(siblings, 1);
+  assert.ok(state.doc.eq(original));
+  assert.equal(state.selection.from, 3);
+});
+test("slow Return and intervening input keep ordinary paragraph breaks", () => {
+  for (const interrupted of [false, true]) {
+    const gesture = new DoubleEnter();
+    let state = EditorState.create({ doc: readContent(plainContent("text")) });
+    let siblings = 0;
+    const dispatch = (tr: EditorState["tr"]) => { gesture.reset(); state = state.apply(tr); };
+    const enter = (time: number) => gesture.handle(() => state, dispatch, () => { siblings++; }, time);
+    enter(100);
+    if (interrupted) dispatch(state.tr.insertText("x"));
+    enter(interrupted ? 200 : 551);
+    assert.equal(siblings, 0);
+    assert.equal(state.doc.childCount, 3);
+  }
+});
+test("double Return leaves nested blocks, code and selected text to normal editing", () => {
+  const paragraph = schema.nodes.paragraph.create(null, schema.text("text"));
+  const docs = [
+    schema.nodes.doc.create(null, schema.nodes.blockquote.create(null, paragraph)),
+    schema.nodes.doc.create(null, schema.nodes.code_block.create(null, schema.text("code")))
+  ];
+  for (const doc of docs) {
+    const state = EditorState.create({ doc });
+    assert.equal(new DoubleEnter().handle(() => state, () => assert.fail("unexpected edit"), () => assert.fail("unexpected sibling"), 100), false);
+  }
+  let state = EditorState.create({ doc: readContent(plainContent("text")) });
+  state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 1, 3)));
+  assert.equal(new DoubleEnter().handle(() => state, () => assert.fail("unexpected edit"), () => assert.fail("unexpected sibling"), 100), false);
+});
+test("node long press follows view and editing state independently of keyboard visibility", () => {
+  for (const editing of [null, "a"]) {
+    assert.equal(allowsNodeLongPress("outline", editing, "a", false), false);
+    assert.equal(allowsNodeLongPress("outline", editing, "b", false), false);
+  }
+  assert.equal(allowsNodeLongPress("map", null, "a", false), true);
+  assert.equal(allowsNodeLongPress("map", "a", "a", false), false);
+  assert.equal(allowsNodeLongPress("map", "a", "b", false), true);
+  assert.equal(allowsNodeLongPress("map", null, null, false), false);
+  assert.equal(allowsNodeLongPress("map", null, "a", true), false);
+});
 function fixture() { const doc = newDocument(); const a = newNode("A"), b = newNode("B"), c = newNode("C"); a.children.push(c); doc.nodeData.children.push(a, b); return { doc, a, b, c }; }
 test("batch movement prunes descendants and rejects cycles without losing nodes", () => {
  const {doc,a,b,c}=fixture(); assert.deepEqual(topLevelSelection(doc.nodeData,[a.id,c.id]).map(n=>n.id),[a.id]);
@@ -137,12 +193,12 @@ test("second Enter at code end exits to text while ordinary code lines stay inta
   assert.equal(exitCodeOnEmptyLine(state), false);
 });
 
-import { setList } from "../src/mindmap/list";
+import { setList, splitUnfinishedListItem } from "../src/mindmap/list";
 test("list styles switch directly with saved markers and preserved content and cursor", () => {
   const item = schema.nodes.list_item.create(null, schema.nodes.paragraph.create(null, schema.text("first", [schema.marks.bold.create()])));
   let state = EditorState.create({ doc: schema.nodes.doc.create(null, schema.nodes.bullet_list.create(null, [item, item])) });
   state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 4)));
-  for (const style of ["ordered", "dash", "bullet", "ordered", "bullet", "dash"] as const) {
+  for (const style of ["ordered", "task", "bullet", "ordered", "bullet", "task"] as const) {
     assert.equal(setList(style)(state), true);
     assert.equal(setList(style)(state, tr => { state = state.apply(tr); }), true);
     const list = readContent(state.doc.toJSON()).firstChild!;
@@ -153,19 +209,19 @@ test("list styles switch directly with saved markers and preserved content and c
     assert.equal(state.selection.from, 4);
   }
 });
-test("dash creation and nested conversion preserve parent style", () => {
+test("task creation and nested conversion preserve parent style", () => {
   let state = EditorState.create({ doc: readContent(plainContent("text")) });
-  setList("dash")(state, tr => { state = state.apply(tr); });
-  assert.equal(state.doc.firstChild!.attrs.marker, "dash");
+  setList("task")(state, tr => { state = state.apply(tr); });
+  assert.equal(state.doc.firstChild!.attrs.marker, "task");
   const nested = schema.nodes.ordered_list.create(null, schema.nodes.list_item.create(null, schema.nodes.paragraph.create(null, schema.text("nested"))));
   const outer = schema.nodes.bullet_list.create(null, schema.nodes.list_item.create(null, [schema.nodes.paragraph.create(null, schema.text("outer")), nested]));
   state = EditorState.create({ doc: schema.nodes.doc.create(null, outer) });
   let cursor = 0;
   state.doc.descendants((node, pos) => { if (node.isText && node.text === "nested") cursor = pos; });
   state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, cursor)));
-  setList("dash")(state, tr => { state = state.apply(tr); });
+  setList("task")(state, tr => { state = state.apply(tr); });
   assert.equal(state.doc.firstChild!.attrs.marker, "bullet");
-  assert.equal(state.doc.firstChild!.firstChild!.child(1).attrs.marker, "dash");
+  assert.equal(state.doc.firstChild!.firstChild!.child(1).attrs.marker, "task");
 });
 
 test("node-local history groups input and restores edits across deletion and structural undo", () => {
@@ -246,4 +302,52 @@ test("large node history drops old groups while retaining recent undo and redo",
   assert.ok(count > 0 && count < 24, "Large snapshots must stay within the history budget");
   for (let index = 0; index < count; index++) assert.equal(store.redo(), true);
   assert.equal(readContent(store.node(id)!.content).textContent, text + 23);
+});
+
+
+test("task completion survives save and splitting starts an unfinished item", () => {
+  const item = schema.nodes.list_item.create({ checked: true }, schema.nodes.paragraph.create(null, schema.text("done")));
+  let state = EditorState.create({ doc: schema.nodes.doc.create(null, schema.nodes.bullet_list.create({ marker: "task" }, item)) });
+  state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 7)));
+  assert.equal(splitUnfinishedListItem(state, tr => { state = state.apply(tr); }), true);
+  const saved = readContent(state.doc.toJSON());
+  assert.equal(saved.firstChild!.child(0).attrs.checked, true);
+  assert.equal(saved.firstChild!.child(1).attrs.checked, false);
+  assert.equal(saved.firstChild!.child(1).textContent, "");
+  assert.equal(state.selection.$from.parent.textContent, "");
+});
+
+
+test("splitting a completed task inside text resets the new item only", () => {
+  const item = schema.nodes.list_item.create({ checked: true }, schema.nodes.paragraph.create(null, schema.text("first second")));
+  let state = EditorState.create({ doc: schema.nodes.doc.create(null, schema.nodes.bullet_list.create({ marker: "task" }, item)) });
+  state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 9)));
+  assert.equal(splitUnfinishedListItem(state, tr => { state = state.apply(tr); }), true);
+  assert.equal(state.doc.firstChild!.child(0).attrs.checked, true);
+  assert.equal(state.doc.firstChild!.child(1).attrs.checked, false);
+  assert.equal(state.doc.firstChild!.child(1).textContent, "second");
+});
+
+test("interchange exports escape XML, preserve tree and package valid XMind ZIP", async () => {
+  const { exportFreeMind, exportOPML, exportXMind, htmlPage } = await import("../src/mindmap/interchange");
+  const doc = newDocument();
+  doc.nodeData.content = plainContent('中文 & <主题> "');
+  doc.nodeData.note = "备注\n第二行";
+  doc.nodeData.expanded = false;
+  doc.nodeData.children.push(newNode("子主题"));
+  assert.match(exportFreeMind(doc), /TEXT="中文 &amp; &lt;主题&gt; &quot;"/);
+  assert.match(exportFreeMind(doc), /FOLDED="true"/);
+  assert.match(exportFreeMind(doc), /TYPE="NOTE"/);
+  assert.match(exportOPML(doc), /<outline text="子主题"/);
+  assert.match(htmlPage("<script>", "<p>正文</p>"), /<title>&lt;script&gt;<\/title>/);
+  const bytes = exportXMind(doc);
+  const view = new DataView(bytes.buffer);
+  assert.equal(view.getUint32(0, true), 0x04034b50);
+  const nameLength = view.getUint16(26, true), size = view.getUint32(18, true);
+  assert.equal(new TextDecoder().decode(bytes.subarray(30, 30 + nameLength)), "content.json");
+  const sheets = JSON.parse(new TextDecoder().decode(bytes.subarray(30 + nameLength, 30 + nameLength + size)));
+  assert.equal(sheets[0].rootTopic.title, '中文 & <主题> "');
+  assert.equal(sheets[0].rootTopic.notes.plain.content, "备注\n第二行");
+  assert.equal(sheets[0].rootTopic.children.attached[0].title, "子主题");
+  assert.equal(view.getUint32(bytes.length - 22, true), 0x06054b50);
 });

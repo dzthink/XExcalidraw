@@ -1,0 +1,17 @@
+{
+  "formats" : [
+    "html",
+    "png",
+    "svg",
+    "mindmap",
+    "xmind",
+    "mm",
+    "opml"
+  ],
+  "htmlBytes" : 16116,
+  "offlineImage" : true,
+  "passed" : true,
+  "pngBytes" : 46653,
+  "standaloneSvgBounds" : true,
+  "viewSwitching" : true
+}

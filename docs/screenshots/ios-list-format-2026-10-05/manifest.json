@@ -1,0 +1,44 @@
+[
+  {
+    "attachments" : [
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "B8E87190-07C6-4345-976F-F1FB688D317E",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "E8F0D092-78A5-4176-90FC-0DE8D3B1A6C2.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "思维导图 saved task completion_0_8AA16B46-83E2-47B1-A663-E27F9C695118.png",
+        "timestamp" : 1791190982.612
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "B8E87190-07C6-4345-976F-F1FB688D317E",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "DC9C3C6E-B270-4B19-BADD-3ADB5D6C532B.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "思维导图 empty task marker and completed item_0_30969B29-BF98-427E-8017-21751F7173F0.png",
+        "timestamp" : 1791190975.206
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "B8E87190-07C6-4345-976F-F1FB688D317E",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "DD588952-079B-47F2-B55A-53F6BB0ABF81.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "大纲 saved task completion_0_0D94DCA8-2872-4870-BD3F-7DF8D92D7546.png",
+        "timestamp" : 1791190957.169
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "B8E87190-07C6-4345-976F-F1FB688D317E",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "BD9F2487-6B0B-4F40-8329-4202A449DC3C.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "大纲 empty task marker and completed item_0_4FA37820-D16B-4FF4-8ED2-2D5C64A2F305.png",
+        "timestamp" : 1791190950.154
+      }
+    ],
+    "testIdentifier" : "ExcalidrawIOSUITests/testMindMapTaskListsSaveCompletionAndEmptyItems()",
+    "testIdentifierURL" : "test://com.apple.xcode/ExcalidrawIOS/ExcalidrawIOSUITests/ExcalidrawIOSUITests/testMindMapTaskListsSaveCompletionAndEmptyItems"
+  }
+]

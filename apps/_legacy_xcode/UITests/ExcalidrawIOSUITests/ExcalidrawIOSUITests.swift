@@ -18,6 +18,91 @@ final class ExcalidrawIOSUITests: XCTestCase {
         attachScreenshot(app, name: "Folder picker")
     }
 
+    func testEditorLeftEdgeSwipeReturnsAndSaves() {
+        let app = makeApplication()
+        app.launchEnvironment["SIYE_UI_TEST_FIXTURE"] = "documents"
+        app.launch()
+        let all = app.buttons["all-documents"]
+        XCTAssertTrue(all.waitForExistence(timeout: 15))
+        all.tap()
+        let file = app.staticTexts["Test Mind Map"].firstMatch
+        XCTAssertTrue(file.waitForExistence(timeout: 15))
+        file.tap()
+        let web = app.webViews["editor-ready"]
+        XCTAssertTrue(web.waitForExistence(timeout: 30))
+        web.buttons["大纲"].tap()
+        web.staticTexts["中心主题"].firstMatch.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        app.typeText("edge-swipe-saved")
+        swipeEditorLeftEdge(app)
+        XCTAssertTrue(file.waitForExistence(timeout: 15))
+        XCTAssertFalse(web.exists)
+
+        file.tap()
+        let saved = web.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "edge-swipe-saved")).firstMatch
+        XCTAssertTrue(saved.waitForExistence(timeout: 30))
+        web.buttons["思维导图"].tap()
+        swipeEditorLeftEdge(app)
+        XCTAssertTrue(file.waitForExistence(timeout: 15))
+
+        let canvas = app.staticTexts["Test Canvas"].firstMatch
+        XCTAssertTrue(canvas.waitForExistence(timeout: 15))
+        canvas.tap()
+        XCTAssertTrue(web.waitForExistence(timeout: 30))
+        swipeEditorLeftEdge(app)
+        XCTAssertTrue(canvas.waitForExistence(timeout: 15))
+        XCTAssertFalse(web.exists)
+        attachScreenshot(app, name: "Returned from editor with left edge swipe")
+    }
+
+    private func swipeEditorLeftEdge(_ app: XCUIApplication) {
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0.4))
+            .withOffset(CGVector(dx: 2, dy: 0))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.4))
+        start.press(forDuration: 0.05, thenDragTo: end)
+    }
+
+    func testMindMapQuickDoubleReturnCreatesSibling() {
+        for mode in ["大纲", "思维导图"] {
+            let app = makeApplication()
+            app.launchEnvironment["SIYE_UI_TEST_FIXTURE"] = "documents"
+            app.launch()
+            let all = app.buttons["all-documents"]
+            XCTAssertTrue(all.waitForExistence(timeout: 15))
+            all.tap()
+            let file = app.staticTexts["Test Mind Map"].firstMatch
+            XCTAssertTrue(file.waitForExistence(timeout: 15))
+            file.tap()
+            let web = app.webViews["editor-ready"]
+            XCTAssertTrue(web.waitForExistence(timeout: 30))
+            web.buttons[mode].tap()
+            let title = web.staticTexts["中心主题"].firstMatch
+            XCTAssertTrue(title.waitForExistence(timeout: 10))
+            if mode == "思维导图" { title.doubleTap() } else { title.tap() }
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+            app.typeText("single-line\ncontinued\n\nchild-one\n\nchild-two")
+            XCTAssertTrue(app.keyboards.firstMatch.exists, "New sibling retains keyboard input")
+            app.otherElements["mindmap-keyboard-accessory"].firstMatch.buttons["收起键盘"].tap()
+            web.buttons["大纲"].tap()
+            attachScreenshot(app, name: "\(mode) double Return input before save")
+            XCTAssertEqual(web.buttons.matching(identifier: "选择节点").count, 2, "Root Return creates a child; child Return creates its sibling")
+            let firstChild = web.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR value == %@", "child-one", "child-one")).firstMatch
+            let secondChild = web.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR value == %@", "child-two", "child-two")).firstMatch
+            XCTAssertTrue(firstChild.exists, app.debugDescription)
+            XCTAssertTrue(secondChild.exists)
+            let titleContent = web.descendants(matching: .any).matching(NSPredicate(format: "label == %@ AND value CONTAINS %@", "文档标题", "continued")).firstMatch
+            XCTAssertTrue(titleContent.exists, "Single Return retains text in the original node")
+            app.buttons["返回"].tap()
+            XCTAssertTrue(file.waitForExistence(timeout: 15))
+            file.tap()
+            XCTAssertTrue(firstChild.waitForExistence(timeout: 30))
+            XCTAssertTrue(secondChild.exists)
+            XCTAssertEqual(web.buttons.matching(identifier: "选择节点").count, 2)
+            attachScreenshot(app, name: "\(mode) double Return creates saved siblings")
+            app.terminate()
+        }
+    }
+
     func testCanvasAndMindMapOpen() {
         let app = makeApplication()
         app.launchEnvironment["SIYE_UI_TEST_FIXTURE"] = "documents"
@@ -130,7 +215,7 @@ final class ExcalidrawIOSUITests: XCTestCase {
             XCTAssertTrue(keyboard.waitForExistence(timeout: 10))
             let accessory = app.otherElements["mindmap-keyboard-accessory"].firstMatch
             XCTAssertTrue(accessory.waitForExistence(timeout: 10))
-            for listStyle in ["无序列表", "有序列表", "短横线列表", "无序列表", "退出列表"] {
+            for listStyle in ["无序列表", "有序列表", "待办列表", "无序列表"] {
                 let list = accessory.buttons["列表"]
                 revealAccessoryButton(list, in: accessory)
                 list.tap()
@@ -142,7 +227,72 @@ final class ExcalidrawIOSUITests: XCTestCase {
                 XCTAssertTrue(keyboard.exists, "List conversion must retain text input")
                 XCTAssertTrue(accessory.exists)
             }
+            let format = accessory.buttons["文字样式"]
+            revealAccessoryButton(format, in: accessory)
+            format.tap()
+            XCTAssertTrue(webToolbarControl(app, label: "增加缩进").isHittable)
+            let outdent = webToolbarControl(app, label: "减少缩进")
+            XCTAssertTrue(outdent.isHittable)
+            outdent.tap()
+            XCTAssertTrue(keyboard.exists)
             attachScreenshot(app, name: "\(mode) list conversion")
+            app.terminate()
+        }
+    }
+
+    func testMindMapTaskListsSaveCompletionAndEmptyItems() {
+        for mode in ["大纲", "思维导图"] {
+            let app = makeApplication()
+            app.launchEnvironment["SIYE_UI_TEST_FIXTURE"] = "documents"
+            app.launch()
+            let file = app.staticTexts["Test Mind Map"].firstMatch
+            XCTAssertTrue(file.waitForExistence(timeout: 15))
+            file.tap()
+            let web = app.webViews["editor-ready"]
+            XCTAssertTrue(web.waitForExistence(timeout: 30))
+            web.buttons[mode].tap()
+            let title = web.staticTexts["中心主题"].firstMatch
+            XCTAssertTrue(title.waitForExistence(timeout: 10))
+            if mode == "思维导图" { title.doubleTap() } else { title.tap() }
+            let keyboard = app.keyboards.firstMatch
+            XCTAssertTrue(keyboard.waitForExistence(timeout: 10))
+            let accessory = app.otherElements["mindmap-keyboard-accessory"].firstMatch
+            XCTAssertTrue(accessory.waitForExistence(timeout: 10))
+            // Start in a new empty child so Return can be checked before typing.
+            app.typeText("\n\n")
+            XCTAssertTrue(keyboard.exists)
+            let list = accessory.buttons["列表"]
+            revealAccessoryButton(list, in: accessory)
+            list.tap()
+            let task = webToolbarControl(app, label: "待办列表")
+            XCTAssertTrue(task.waitForExistence(timeout: 5))
+            XCTAssertFalse(webToolbarControl(app, label: "短横线列表").exists)
+            XCTAssertFalse(webToolbarControl(app, label: "增加缩进").exists)
+            XCTAssertFalse(webToolbarControl(app, label: "减少缩进").exists)
+            task.tap()
+            let checks = web.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "完成待办"))
+            XCTAssertEqual(checks.count, 1)
+            let before = String(describing: checks.element(boundBy: 0).value)
+            checks.element(boundBy: 0).tap()
+            let completed = String(describing: checks.element(boundBy: 0).value)
+            XCTAssertNotEqual(completed, before, app.debugDescription)
+            XCTAssertTrue(keyboard.exists, "Checking a task retains keyboard input")
+            app.typeText("task-one\n")
+            XCTAssertEqual(checks.count, 2, "Return shows a checkbox before any text is entered")
+            XCTAssertEqual(String(describing: checks.element(boundBy: 1).value), before, "New task is unfinished")
+            XCTAssertFalse(web.buttons["在块后继续输入"].exists)
+            attachScreenshot(app, name: "\(mode) empty task marker and completed item")
+            app.typeText("task-two")
+            accessory.buttons["收起键盘"].tap()
+            app.buttons["返回"].tap()
+            XCTAssertTrue(file.waitForExistence(timeout: 15))
+            file.tap()
+            XCTAssertTrue(web.waitForExistence(timeout: 30))
+            XCTAssertTrue(checks.element(boundBy: 0).waitForExistence(timeout: 10))
+            XCTAssertEqual(checks.count, 2)
+            XCTAssertEqual(String(describing: checks.element(boundBy: 0).value), completed)
+            XCTAssertEqual(String(describing: checks.element(boundBy: 1).value), before)
+            attachScreenshot(app, name: "\(mode) saved task completion")
             app.terminate()
         }
     }
@@ -189,6 +339,77 @@ final class ExcalidrawIOSUITests: XCTestCase {
         }
     }
 
+    func testMindMapInputInteractionStates() {
+        checkMindMapInputInteractionStates(modes: ["大纲", "思维导图"])
+    }
+
+    func testMindMapEditingTextSelection() {
+        checkMindMapInputInteractionStates(modes: ["思维导图"])
+    }
+
+    private func checkMindMapInputInteractionStates(modes: [String]) {
+        for mode in modes {
+            let app = makeApplication()
+            app.launchEnvironment["SIYE_UI_TEST_FIXTURE"] = "documents"
+            app.launch()
+            let all = app.buttons["all-documents"]
+            XCTAssertTrue(all.waitForExistence(timeout: 15), app.debugDescription)
+            all.tap()
+            let file = app.staticTexts["Test Mind Map"].firstMatch
+            XCTAssertTrue(file.waitForExistence(timeout: 15), app.debugDescription)
+            file.tap()
+            let web = app.webViews["editor-ready"]
+            XCTAssertTrue(web.waitForExistence(timeout: 30))
+            web.buttons[mode].tap()
+            let title = web.staticTexts["中心主题"].firstMatch
+            XCTAssertTrue(title.waitForExistence(timeout: 10))
+            if mode == "大纲" {
+                title.press(forDuration: 0.8)
+                XCTAssertFalse(web.menuItems["编辑节点"].exists, "Outline never offers a long-press node menu")
+                title.tap()
+            } else {
+                title.press(forDuration: 0.8)
+                let edit = web.menuItems["编辑节点"]
+                XCTAssertTrue(edit.waitForExistence(timeout: 5), app.debugDescription)
+                web.menuItems["取消"].tap()
+                title.doubleTap()
+            }
+            let keyboard = app.keyboards.firstMatch
+            XCTAssertTrue(keyboard.waitForExistence(timeout: 10))
+            let label = mode == "大纲" ? "文档标题" : "节点正文"
+            let field = web.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR identifier == %@", label, label)).firstMatch
+            XCTAssertTrue(field.waitForExistence(timeout: 5))
+            field.press(forDuration: 0.8)
+            XCTAssertFalse(web.menuItems["编辑节点"].exists, "Editing nodes preserve system text selection")
+            XCTAssertTrue(keyboard.exists)
+            let textActions = app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", ["选择", "全选", "拷贝", "复制", "Select", "Select All", "Copy"]))
+            XCTAssertTrue(textActions.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+            attachScreenshot(app, name: "\(mode) system text selection")
+            if mode == "大纲" {
+                let accessory = app.otherElements["mindmap-keyboard-accessory"].firstMatch
+                for index in 0..<10 {
+                    field.tap()
+                    accessory.buttons["收起键盘"].tap()
+                    let add = web.buttons["＋ 添加条目"]
+                    if !add.isHittable { web.swipeUp() }
+                    XCTAssertTrue(add.isHittable)
+                    add.tap()
+                    XCTAssertTrue(keyboard.waitForExistence(timeout: 10))
+                    let text = "visible-\(index)"
+                    app.typeText(text)
+                    let added = web.descendants(matching: .any).matching(NSPredicate(format: "(label == '节点正文' OR identifier == '节点正文') AND value CONTAINS %@", text)).firstMatch
+                    XCTAssertTrue(added.waitForExistence(timeout: 5), app.debugDescription)
+                    let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                        added.frame.minY >= web.frame.minY && added.frame.maxY <= accessory.frame.minY
+                    }, object: added)
+                    XCTAssertEqual(XCTWaiter.wait(for: [visible], timeout: 5), .completed)
+                }
+                attachScreenshot(app, name: "Outline new entry above keyboard")
+            }
+            app.terminate()
+        }
+    }
+
     func testMindMapToolbarAboveKeyboard() {
         for mode in ["大纲", "思维导图"] {
             let app = makeApplication()
@@ -215,6 +436,10 @@ final class ExcalidrawIOSUITests: XCTestCase {
             let field = app.webViews.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR identifier == %@", fieldLabel, fieldLabel)).firstMatch
             XCTAssertTrue(field.waitForExistence(timeout: 5), app.debugDescription)
             XCTAssertLessThanOrEqual(field.frame.maxY, accessory.frame.minY, "The editing node remains above the input accessory")
+            field.press(forDuration: 0.8)
+            XCTAssertFalse(app.webViews.menuItems["编辑节点"].exists, "Long pressing editable text must preserve native text selection")
+            XCTAssertTrue(keyboard.exists, "Text selection must retain the keyboard")
+            field.tap()
             attachScreenshot(app, name: "\(mode) native keyboard accessory")
             app.typeText(".")
             let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "."), object: field)
@@ -243,7 +468,7 @@ final class ExcalidrawIOSUITests: XCTestCase {
                 XCTAssertTrue(item.isHittable, "Native controls must open a visible usable panel: \(item.debugDescription)\n\(app.debugDescription)")
                 XCTAssertLessThanOrEqual(item.frame.maxY, accessory.frame.minY)
                 if control == "列表" {
-                    for listStyle in ["无序列表", "有序列表", "短横线列表", "退出列表"] {
+                    for listStyle in ["无序列表", "有序列表", "待办列表"] {
                         let option = webToolbarControl(app, label: listStyle)
                         XCTAssertTrue(option.isHittable, "Every list style must be usable above the native keyboard")
                         XCTAssertLessThanOrEqual(option.frame.maxY, accessory.frame.minY)
@@ -301,7 +526,15 @@ final class ExcalidrawIOSUITests: XCTestCase {
     }
 
     func testMindMapBlocksAndLongPressMenu() {
-        for mode in ["大纲", "思维导图"] {
+        verifyMindMapBlocks(includeNodeMenu: true)
+    }
+
+    func testMindMapBlocksContinueWithoutHelper() {
+        verifyMindMapBlocks(includeNodeMenu: false, modes: ["大纲"])
+    }
+
+    private func verifyMindMapBlocks(includeNodeMenu: Bool, modes: [String] = ["大纲", "思维导图"]) {
+        for mode in modes {
             let app = makeApplication()
             app.launchEnvironment["SIYE_UI_TEST_FIXTURE"] = "documents"
             app.launch()
@@ -315,7 +548,8 @@ final class ExcalidrawIOSUITests: XCTestCase {
             if mode == "思维导图" { title.doubleTap() } else { title.tap() }
             let accessory = app.otherElements["mindmap-keyboard-accessory"].firstMatch
             XCTAssertTrue(accessory.waitForExistence(timeout: 10))
-            let label = mode == "思维导图" ? "节点正文" : "文档标题"
+            app.typeText("\n\nblock-node")
+            let label = "节点正文"
             let field = app.webViews.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR identifier == %@", label, label)).firstMatch
             let table = accessory.buttons["表格"]
             revealAccessoryButton(table, in: accessory)
@@ -327,9 +561,14 @@ final class ExcalidrawIOSUITests: XCTestCase {
             // to exercise continuation from inside the block itself.
             field.coordinate(withNormalizedOffset: CGVector(dx: 0.16, dy: 0.30)).tap()
             app.typeText("cell text")
-            let after = app.webViews.buttons["在块后继续输入"]
-            XCTAssertTrue(after.waitForExistence(timeout: 5), app.debugDescription)
-            after.tap()
+            XCTAssertFalse(app.webViews.buttons["在块后继续输入"].exists)
+            // Tap the reserved paragraph beneath the table to continue typing.
+            if mode == "思维导图" {
+                let visible = field.frame.intersection(app.webViews.firstMatch.frame)
+                app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: visible.midX, dy: field.frame.maxY - 24)).tap()
+            } else {
+                field.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.98)).tap()
+            }
             app.typeText("after table")
             let tableText = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "after table"), object: field)
             XCTAssertEqual(XCTWaiter.wait(for: [tableText], timeout: 5), .completed)
@@ -339,12 +578,12 @@ final class ExcalidrawIOSUITests: XCTestCase {
             code.tap()
             webToolbarControl(app, label: "代码块").tap()
             app.typeText(" code text")
-            XCTAssertTrue(after.waitForExistence(timeout: 5))
-            after.tap()
-            app.typeText("after code")
+            app.typeText("\n\nafter code")
+            XCTAssertFalse(app.webViews.buttons["在块后继续输入"].exists)
             let codeText = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "after code"), object: field)
             XCTAssertEqual(XCTWaiter.wait(for: [codeText], timeout: 5), .completed)
             attachScreenshot(app, name: "\(mode) text after table and code")
+            if !includeNodeMenu { app.terminate(); continue }
             accessory.buttons["收起键盘"].tap()
             field.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.04)).press(forDuration: 0.8)
             let child = app.webViews.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "添加子节点")).firstMatch
@@ -399,6 +638,48 @@ final class ExcalidrawIOSUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Nested Idea"].exists)
         app.buttons["清除搜索"].tap()
         XCTAssertTrue(app.staticTexts["Nested Idea"].firstMatch.exists)
+    }
+
+    func testNewMindMapDoesNotReusePreviouslyOpenedDocument() {
+        let app = makeApplication()
+        app.launchEnvironment["SIYE_UI_TEST_FIXTURE"] = "browser"
+        app.launch()
+        let original = app.staticTexts["Test Mind Map"].firstMatch
+        XCTAssertTrue(original.waitForExistence(timeout: 15))
+        original.tap()
+        let web = app.webViews["editor-ready"]
+        XCTAssertTrue(web.waitForExistence(timeout: 30))
+        web.buttons["大纲"].tap()
+        web.staticTexts["中心主题"].firstMatch.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        app.typeText("original-only")
+        app.buttons["返回"].tap()
+        XCTAssertTrue(original.waitForExistence(timeout: 15))
+
+        // Reopen without editing before creating, matching the reported trigger.
+        original.tap()
+        XCTAssertTrue(web.staticTexts.matching(NSPredicate(format: "label CONTAINS 'original-only'")).firstMatch.waitForExistence(timeout: 15))
+        app.buttons["返回"].tap()
+        XCTAssertTrue(app.buttons["browser-create"].waitForExistence(timeout: 10))
+        app.buttons["browser-create"].tap()
+        app.buttons["新建思维导图"].tap()
+        XCTAssertTrue(web.staticTexts["中心主题"].firstMatch.waitForExistence(timeout: 15))
+        XCTAssertFalse(web.staticTexts.matching(NSPredicate(format: "label CONTAINS 'original-only'")).firstMatch.exists)
+        attachScreenshot(app, name: "New independent blank mind map")
+        web.buttons["大纲"].tap()
+        web.staticTexts["中心主题"].firstMatch.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        app.typeText("new-only")
+        app.buttons["返回"].tap()
+        let created = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Untitled-'")).firstMatch
+        XCTAssertTrue(created.waitForExistence(timeout: 15))
+        for (file, included, excluded) in [(original, "original-only", "new-only"), (created, "new-only", "original-only")] {
+            file.tap()
+            XCTAssertTrue(web.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", included)).firstMatch.waitForExistence(timeout: 15))
+            XCTAssertFalse(web.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", excluded)).firstMatch.exists)
+            app.buttons["返回"].tap()
+            XCTAssertTrue(app.buttons["browser-create"].waitForExistence(timeout: 10))
+        }
     }
 
     func testCreateFromFolderPageAndAllDocuments() {

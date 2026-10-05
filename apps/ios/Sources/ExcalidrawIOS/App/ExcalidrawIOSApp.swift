@@ -157,6 +157,8 @@ struct ContentView: View {
     @State private var selectedEntryId: UUID?
     @State private var navigationPath = NavigationPath()
     @State private var isShowingSettings = false
+    @State private var isShowingImport = false
+    @State private var importError: String?
     
 
     
@@ -192,7 +194,33 @@ struct ContentView: View {
                 selectedEntryId: $selectedEntryId,
                 navigationPath: $navigationPath
             )
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button { isShowingSettings = true } label: { Label("设置", systemImage: "gearshape") } } }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button { isShowingImport = true } label: { Label("导入", systemImage: "square.and.arrow.down") } }
+                ToolbarItem(placement: .topBarTrailing) { Button { isShowingSettings = true } label: { Label("设置", systemImage: "gearshape") } }
+            }
+            .alert("导入失败", isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
+                Button("好") { importError = nil }
+            } message: { Text(importError ?? "") }
+            .fileImporter(isPresented: $isShowingImport, allowedContentTypes: DocumentTransferFormats.importTypes) { result in
+                switch result {
+                case .success(let url):
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    viewModel.flushEditing { success in
+                        guard success else { if scoped { url.stopAccessingSecurityScopedResource() }; return }
+                        documentManager.importScene(from: url) { imported in
+                            if scoped { url.stopAccessingSecurityScopedResource() }
+                            switch imported {
+                            case .success(let entry):
+                                selectedEntryId = entry.id
+                                viewModel.open(entry: entry)
+                                navigationPath.append(EditorDestination(entryId: entry.id))
+                            case .failure(let error): importError = error.localizedDescription
+                            }
+                        }
+                    }
+                case .failure(let error): importError = error.localizedDescription
+                }
+            }
             .sheet(isPresented: $isShowingSettings) { NavigationStack { SiyeSettingsView().toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { isShowingSettings = false } } } } }
             .navigationDestination(for: FolderDestination.self) { destination in
                 FileListView(
@@ -1123,16 +1151,15 @@ struct BrowserBottomBar: View {
         guard !isCreating else { return }
         isSearchFocused = false
         isCreating = true
-        documentManager.createBlankDocument(
+        viewModel.createNewDocument(
             in: documentManager.activeSource?.id,
             relativeFolderPath: folderPath ?? "",
             type: type
         ) { result in
             isCreating = false
             switch result {
-            case .success(let scene):
+            case .success:
                 guard let entry = documentManager.currentEntry else { return }
-                viewModel.loadScene(scene)
                 selectedEntryId = entry.id
                 navigationPath.append(EditorDestination(entryId: entry.id))
             case .failure(let error):
@@ -1687,6 +1714,7 @@ struct EditorView: View {
     @Binding var selectedEntryId: UUID?
     @Binding var navigationPath: NavigationPath
     @State private var isEditingTitle = false
+    @State private var isReturning = false
     @State private var editableTitle = ""
     @FocusState private var titleFieldFocused: Bool
     
@@ -1696,7 +1724,7 @@ struct EditorView: View {
     
     var body: some View {
         ZStack {
-            WebCanvasView(webView: viewModel.webView)
+            WebCanvasView(webView: viewModel.webView, onBack: returnToBrowser)
                 .ignoresSafeArea()
                 .accessibilityIdentifier(viewModel.isCanvasReady ? "editor-ready" : "editor-loading")
             
@@ -1742,15 +1770,7 @@ struct EditorView: View {
             }
             
             ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    viewModel.cancelOpening()
-                    viewModel.flushEditing { success in
-                        guard success else { viewModel.documentLoadError = "当前文档未能保存，请稍后重试"; return }
-                        if !navigationPath.isEmpty { navigationPath.removeLast() }
-                        documentManager.clearCurrentEntry()
-                        selectedEntryId = nil
-                    }
-                } label: {
+                Button(action: returnToBrowser) {
                     HStack(spacing: 4) {
                         Image(systemName: "chevron.left")
                             .fontWeight(.semibold)
@@ -1760,37 +1780,33 @@ struct EditorView: View {
             }
                 
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button {
-                            viewModel.requestExport(format: "png")
-                        } label: {
-                            Label("导出为 PNG", systemImage: "photo")
-                        }
-                        
-                        Button {
-                            viewModel.requestExport(format: "svg")
-                        } label: {
-                            Label("导出为 SVG", systemImage: "doc.text")
-                        }
-                        
-                        Button {
-                            viewModel.requestExport(format: "json")
-                        } label: {
-                            Label("导出为 JSON", systemImage: "doc.json")
-                        }
-                    } label: {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.title3)
-                            .foregroundStyle(.primary)
+                    DocumentExportMenu(mindMap: documentManager.currentEntry?.fileURL.pathExtension == "mindmap") { format in
+                        viewModel.requestExport(format: format)
                     }
                 }
             }
         .onDisappear {
-            viewModel.cancelOpening()
+            // Back already cancels opening; delayed disappearance must not cancel the next load.
             viewModel.flushEditing { _ in }
         }
     }
     
+    private func returnToBrowser() {
+        guard !isReturning, !navigationPath.isEmpty else { return }
+        isReturning = true
+        viewModel.cancelOpening()
+        viewModel.flushEditing { success in
+            isReturning = false
+            guard success else {
+                viewModel.documentLoadError = "当前文档未能保存，请稍后重试"
+                return
+            }
+            withAnimation { navigationPath.removeLast() }
+            documentManager.clearCurrentEntry()
+            selectedEntryId = nil
+        }
+    }
+
     private func commitRename() {
         let newName = editableTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !newName.isEmpty, newName != currentFileName else {
@@ -1912,12 +1928,74 @@ struct SourceSwitcherSheet: View {
 
 struct WebCanvasView: UIViewRepresentable {
     let webView: WKWebView
-    
+    let onBack: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onBack: onBack) }
+
     func makeUIView(context: Context) -> WKWebView {
-        webView
+        let edgeCapture = context.coordinator.edgeCapture
+        webView.addSubview(edgeCapture)
+        NSLayoutConstraint.activate([
+            edgeCapture.leadingAnchor.constraint(equalTo: webView.leadingAnchor),
+            edgeCapture.topAnchor.constraint(equalTo: webView.topAnchor),
+            edgeCapture.bottomAnchor.constraint(equalTo: webView.bottomAnchor),
+            edgeCapture.widthAnchor.constraint(equalToConstant: 20)
+        ])
+        webView.addGestureRecognizer(context.coordinator.edgePan)
+        return webView
     }
-    
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
+
+    func updateUIView(_ uiView: WKWebView, context: Context) {
+        context.coordinator.onBack = onBack
+        uiView.bringSubviewToFront(context.coordinator.edgeCapture)
+    }
+
+    static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
+        uiView.removeGestureRecognizer(coordinator.edgePan)
+        coordinator.edgeCapture.removeFromSuperview()
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var onBack: () -> Void
+        let edgeCapture: UIView = {
+            // Canvas touch-action rules can suppress recognizers on web content.
+            // Reserve a narrow native strip for the navigation gesture.
+            let view = UIView()
+            view.translatesAutoresizingMaskIntoConstraints = false
+            view.backgroundColor = .clear
+            view.isAccessibilityElement = false
+            return view
+        }()
+        lazy var edgePan: UIScreenEdgePanGestureRecognizer = {
+            let gesture = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(handleEdgePan(_:)))
+            gesture.edges = .left
+            gesture.maximumNumberOfTouches = 1
+            gesture.delegate = self
+            return gesture
+        }()
+
+        init(onBack: @escaping () -> Void) { self.onBack = onBack }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = gestureRecognizer as? UIScreenEdgePanGestureRecognizer else { return false }
+            let velocity = pan.velocity(in: pan.view)
+            return velocity.x > 0 && velocity.x > abs(velocity.y)
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            // Reserve the screen edge for navigation before web scrolling or canvas panning.
+            otherGestureRecognizer is UIPanGestureRecognizer
+        }
+
+        @objc private func handleEdgePan(_ gesture: UIScreenEdgePanGestureRecognizer) {
+            guard gesture.state == .ended else { return }
+            let translation = gesture.translation(in: gesture.view)
+            let velocity = gesture.velocity(in: gesture.view)
+            guard translation.x > abs(translation.y),
+                  translation.x >= 70 || translation.x >= 24 && velocity.x >= 500 else { return }
+            onBack()
+        }
+    }
 }
 
 // MARK: - Web Canvas View Model
@@ -2007,6 +2085,7 @@ private final class NodeKeyboardAccessory: UIView {
 }
 
 private final class CanvasWebView: WKWebView, UIDocumentPickerDelegate, UIGestureRecognizerDelegate {
+    var allowsNodeLongPress = false
     private lazy var nodeAccessory: NodeKeyboardAccessory = {
         let view = NodeKeyboardAccessory()
         view.onAction = { [weak self] action in
@@ -2038,6 +2117,7 @@ private final class CanvasWebView: WKWebView, UIDocumentPickerDelegate, UIGestur
         nodePress.name = "siye-node-long-press"
         nodePress.minimumPressDuration = 0.35
         nodePress.allowableMovement = 10
+        nodePress.cancelsTouchesInView = false
         nodePress.delegate = self
         addGestureRecognizer(nodePress)
         NotificationCenter.default.addObserver(self, selector: #selector(updateAccessoryFrame), name: UIResponder.keyboardDidChangeFrameNotification, object: nil)
@@ -2047,7 +2127,11 @@ private final class CanvasWebView: WKWebView, UIDocumentPickerDelegate, UIGestur
 
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard gestureRecognizer.name == "siye-node-long-press" else { return super.gestureRecognizerShouldBegin(gestureRecognizer) }
-        return usesNodeToolbar && gestureRecognizer.numberOfTouches == 1
+        return usesNodeToolbar && allowsNodeLongPress && gestureRecognizer.numberOfTouches == 1
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        gestureRecognizer.name == "siye-node-long-press" || otherGestureRecognizer.name == "siye-node-long-press"
     }
 
     @objc private func showNodeMenu(_ gesture: UILongPressGestureRecognizer) {
@@ -2203,7 +2287,12 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
     }
 
     private func handleMessage(type: String, payload: [String: Any]) {
-        if type == "saveScene" {
+        if type == "nodeInteractionState" {
+            guard payload["docId"] as? String == currentDocumentID else { return }
+            (webView as? CanvasWebView)?.allowsNodeLongPress = payload["viewMode"] as? String == "map"
+                && (payload["editingId"] == nil || payload["editingId"] is NSNull)
+                && payload["readOnly"] as? Bool == false
+        } else if type == "saveScene" {
             handleSave(payload: payload)
         } else if type == "openLink" {
             if let value = payload["url"] as? String, let url = URL(string: value), ["https", "http", "mailto"].contains(url.scheme?.lowercased() ?? "") {
@@ -2221,6 +2310,8 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
             flushPendingSceneIfNeeded()
             sendThemeUpdate()
             sendAIConfig()
+        } else if type == "exportFailed" {
+            documentLoadError = "导出失败：" + (payload["error"] as? String ?? "未知错误")
         } else if type == "exportResult" {
             handleExport(payload: payload)
         } else if type == "requestAI" {
@@ -2233,7 +2324,8 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
               let dataBase64 = payload["dataBase64"] as? String,
               let exportData = Data(base64Encoded: dataBase64) else { return }
         
-        let ext = format == "png" ? "png" : format == "svg" ? "svg" : "json"
+        guard DocumentTransferFormats.exportType(format) != nil else { return }
+        let ext = format
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         let fileName = "Export-\(formatter.string(from: Date())).\(ext)"
@@ -2241,13 +2333,20 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
         guard let baseURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
         let fileURL = baseURL.appendingPathComponent(fileName)
         
-        try? exportData.write(to: fileURL)
+        do { try exportData.write(to: fileURL, options: .atomic) }
+        catch { documentLoadError = "导出失败：" + error.localizedDescription; return }
         
         DispatchQueue.main.async {
             guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                   let rootViewController = windowScene.windows.first(where: { $0.isKeyWindow })?.rootViewController else { return }
             let activityController = UIActivityViewController(activityItems: [fileURL], applicationActivities: nil)
-            rootViewController.present(activityController, animated: true)
+            var presenter = rootViewController
+            while let presented = presenter.presentedViewController { presenter = presented }
+            if let popover = activityController.popoverPresentationController {
+                popover.sourceView = presenter.view
+                popover.sourceRect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 1, height: 1)
+            }
+            presenter.present(activityController, animated: true)
         }
     }
 
@@ -2322,16 +2421,25 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
         }
     }
 
-    func createNewDocument(type: SiyeDocumentType = .excalidraw) {
-        documentManager.createBlankDocument(type: type) { [weak self] result in
+    func createNewDocument(
+        in folderId: UUID? = nil,
+        relativeFolderPath: String = "",
+        type: SiyeDocumentType = .excalidraw,
+        completion: @escaping (Result<DocumentScene, Error>) -> Void
+    ) {
+        cancelOpening()
+        flushEditing { [weak self] success in
             guard let self else { return }
-            if case .success(let scene) = result {
-                self.queueScenePayload([
-                    "docId": scene.docId,
-                    "sceneJson": scene.sceneJson,
-                    "readOnly": scene.readOnly
-                ])
-                self.hasUnsavedChanges = false
+            guard success else {
+                completion(.failure(NSError(domain: "WebCanvas", code: 1, userInfo: [NSLocalizedDescriptionKey: "当前文档未能保存，请稍后重试"])))
+                return
+            }
+            self.documentManager.createBlankDocument(in: folderId, relativeFolderPath: relativeFolderPath, type: type) { [weak self] result in
+                guard let self else { return }
+                if case .success(let scene) = result {
+                    self.loadScene(scene)
+                }
+                completion(result)
             }
         }
     }
@@ -2420,7 +2528,9 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
     }
 
     func requestExport(format: String) {
-        send(type: "export", payload: ["format": format])
+        flushEditing { [weak self] success in
+            if success { self?.send(type: "requestExport", payload: ["format": format, "embedScene": true]) }
+        }
     }
 
     func setPreferredTheme(_ colorScheme: ColorScheme) {
@@ -2476,6 +2586,7 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
 
     private func deliver(type: String, payload: [String: Any]) {
         if (type == "loadScene" || type == "updateDocId"), let docId = payload["docId"] as? String {
+            if type == "loadScene" { (webView as? CanvasWebView)?.allowsNodeLongPress = false }
             currentDocumentID = docId
             (webView as? CanvasWebView)?.usesNodeToolbar = SiyeDocumentType(fileName: docId) == .mindmap || (payload["sceneJson"] as? [String: Any])?["format"] as? String == "siye-mindmap"
             let context = documentManager.attachmentContext(docId: docId)

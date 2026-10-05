@@ -1,5 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useLayoutEffect, useRef } from "react";
 import { EditorState, TextSelection, NodeSelection, AllSelection, type Transaction } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { baseKeymap, toggleMark, wrapIn } from "prosemirror-commands";
@@ -7,6 +6,7 @@ import { sinkListItem, liftListItem } from "prosemirror-schema-list";
 import { tableEditing, goToNextCell } from "prosemirror-tables";
 import { continueAfterBlock, exitCodeOnEmptyLine, trailingParagraph, withTrailingParagraph } from "./blockEditing";
 import { schema, readContent, attachmentSource, safeLink } from "./richText";
+import { DoubleEnter } from "./doubleEnter";
 import type { Cursor, RichDocument } from "./document";
 import "prosemirror-view/style/prosemirror.css";
 import "prosemirror-tables/style/tables.css";
@@ -17,19 +17,19 @@ type Props = {
   onChange: (content: RichDocument, previous: Cursor, next: Cursor) => void;
   onActive: (handle: EditorHandle) => void; onBlur: () => void;
   onKey: (view: EditorView, event: KeyboardEvent) => boolean;
+  onDoubleEnter: () => void;
   onImage: (file: File, view: EditorView) => void;
   onResize: () => void;
   restore?: Cursor | null;
 };
 export default function RichEditor(props: Props) {
-  const [isActive, setIsActive] = useState(false);
-  const [hasBlocks, setHasBlocks] = useState(() => (props.content.content ?? []).some(node => !["paragraph", "heading"].includes(node.type)));
   const host = useRef<HTMLDivElement>(null);
-  const continueButton = useRef<HTMLButtonElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const latest = useRef(props); latest.current = props;
   useLayoutEffect(() => {
     if (!host.current) return;
+    const doubleEnter = new DoubleEnter();
+    const ios = /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
     const view = new EditorView(host.current, {
       state: EditorState.create({ doc: withTrailingParagraph(readContent(props.content)), plugins: [tableEditing(), trailingParagraph] }),
       editable: () => !latest.current.readOnly,
@@ -45,18 +45,45 @@ export default function RichEditor(props: Props) {
         }
       },
       dispatchTransaction(transaction: Transaction) {
+        if (transaction.docChanged || transaction.selectionSet && !transaction.selection.eq(view.state.selection)) doubleEnter.reset();
         const previous = { id: props.id, from: view.state.selection.from, to: view.state.selection.to, field: "content" as const };
         const result = view.state.applyTransaction(transaction);
         view.updateState(result.state);
-        setHasBlocks(view.state.doc.content.content.some(node => ![schema.nodes.paragraph, schema.nodes.heading].includes(node.type)));
         const next = { ...previous, from: view.state.selection.from, to: view.state.selection.to };
         if (result.transactions.some(tr => tr.docChanged)) latest.current.onChange(view.state.doc.toJSON(), previous, next);
         latest.current.onActive({ id: props.id, view });
       },
       handleDOMEvents: {
-        focus: () => { setIsActive(true); latest.current.onActive({ id: props.id, view }); return false; },
-        blur: () => { setIsActive(false); latest.current.onBlur(); return false; },
-        pointerdown: (_view, event) => { event.stopPropagation(); return false; }
+        click: (_view, event) => {
+          const checkbox = (event.target as HTMLElement).closest("[data-task-checkbox]");
+          if (checkbox) {
+            event.preventDefault();
+            if (latest.current.readOnly) return true;
+            const item = checkbox.closest("li");
+            const list = item?.parentElement;
+            if (!item || list?.getAttribute("data-list-marker") !== "task") return false;
+            const pos = view.posAtDOM(item, 0);
+            const $pos = view.state.doc.resolve(pos);
+            for (let depth = $pos.depth; depth > 0; depth--) {
+              const node = $pos.node(depth);
+              if (node.type === schema.nodes.list_item) {
+                view.dispatch(view.state.tr.setNodeMarkup($pos.before(depth), undefined, { ...node.attrs, checked: !node.attrs.checked }));
+                return true;
+              }
+            }
+            return true;
+          }
+          return false;
+        },
+        focus: () => { latest.current.onActive({ id: props.id, view }); return false; },
+        blur: () => { doubleEnter.reset(); latest.current.onBlur(); return false; },
+        compositionstart: () => { doubleEnter.reset(); return false; },
+        pointerdown: (_view, event) => { doubleEnter.reset(); event.stopPropagation(); return false; },
+        pointermove: (_view, event) => { event.stopPropagation(); return false; },
+        pointerup: (_view, event) => { event.stopPropagation(); return false; },
+        touchstart: (_view, event) => { event.stopPropagation(); return false; },
+        touchmove: (_view, event) => { event.stopPropagation(); return false; },
+        touchend: (_view, event) => { event.stopPropagation(); return false; }
       },
       handleTextInput(view, from, to, text) {
         const { $from } = view.state.selection;
@@ -81,7 +108,10 @@ export default function RichEditor(props: Props) {
       },
       handleKeyDown(view, event) {
         event.stopPropagation();
-        if (view.composing || event.isComposing) return false;
+        if (view.composing || event.isComposing) { doubleEnter.reset(); return false; }
+        if (ios && !latest.current.readOnly && event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey && !event.repeat) {
+          if (doubleEnter.handle(() => view.state, view.dispatch, () => latest.current.onDoubleEnter(), performance.now())) return true;
+        } else doubleEnter.reset();
         if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && continueAfterBlock(view.state, view.dispatch)) return true;
         if (event.key === "Enter" && !event.shiftKey && exitCodeOnEmptyLine(view.state, view.dispatch)) return true;
         if (latest.current.onKey(view, event)) return true;
@@ -143,39 +173,6 @@ export default function RichEditor(props: Props) {
     view.dispatch(view.state.tr.setSelection(selection));
     view.focus();
   }, [props.restore]);
-  const continueInput = () => {
-    const view = viewRef.current;
-    if (!view || !continueAfterBlock(view.state, view.dispatch)) return;
-    const bookmark = view.state.selection.getBookmark();
-    view.focus();
-    // WebKit may restore the old native caret after moving out of a table.
-    requestAnimationFrame(() => {
-      if (viewRef.current !== view || !view.dom.isConnected) return;
-      view.dispatch(view.state.tr.setSelection(bookmark.resolve(view.state.doc)));
-    });
-  };
-  useLayoutEffect(() => {
-    const button = continueButton.current;
-    if (!button) return;
-    const touch = (event: TouchEvent) => {
-      event.preventDefault(); event.stopPropagation();
-      continueInput();
-    };
-    // Cancelling pointerdown does not cancel WebKit's native touch focus change.
-    button.addEventListener("touchstart", touch, { passive: false });
-    return () => button.removeEventListener("touchstart", touch);
-  }, [isActive, hasBlocks, props.readOnly]);
-  const surface = host.current?.closest(".siye-editor");
-  return <div className="mindmap-rich-editor">
-    <div ref={host} />
-    {surface && isActive && hasBlocks && !props.readOnly && createPortal(<button ref={continueButton} type="button" className="mindmap-continue-after-block"
-      onMouseDown={event => event.preventDefault()}
-      onPointerDown={event => {
-        event.preventDefault(); event.stopPropagation();
-        // Retain native keyboard focus within the trusted touch event.
-        continueInput();
-      }}
-      onClick={continueInput}>在块后继续输入</button>, surface)}
-  </div>;
+  return <div className="mindmap-rich-editor"><div ref={host} /></div>;
 }
 export function selectImage(view: EditorView): boolean { return view.state.selection instanceof NodeSelection && view.state.selection.node.type.name === "image"; }

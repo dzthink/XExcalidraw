@@ -18,8 +18,11 @@
 .siye-editor .mindmap-node-toolbar{bottom:calc(24px + env(safe-area-inset-bottom,0px) + var(--keyboard-inset,0px))}
 @media(pointer:coarse){.siye-editor .outline-row{min-height:38px}.siye-editor .outline-controls button{min-width:22px;min-height:34px}.siye-editor .mindmap-node-toolbar button,.siye-editor .mindmap-image-picker{min-height:34px;box-sizing:border-box}}
 .siye-editor:before{content:"";position:absolute;top:0;left:0;right:0;height:52px;background:var(--siye-bg);z-index:4;pointer-events:none}
-.siye-editor me-tpc>.mindmap-node-edit-content{pointer-events:auto;user-select:text;cursor:text}
-.siye-editor .ProseMirror{pointer-events:auto;user-select:text;cursor:text}
+.siye-editor me-tpc.siye-editing,.siye-editor me-tpc>.mindmap-node-edit-content{pointer-events:auto;-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;cursor:text}
+.siye-editor .ProseMirror,.siye-editor .ProseMirror *{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}
+.siye-editor .ProseMirror{pointer-events:auto;cursor:text}
+.siye-editor[data-map-editing="true"] .mindmap-canvas .map-container,.siye-editor[data-map-editing="true"] .map-canvas{touch-action:auto;-webkit-user-select:text;user-select:text}
+.siye-editor .mindmap-node-body{-webkit-user-select:none;user-select:none}
 .siye-editor .mindmap-inline-note,.siye-editor .mindmap-rich-content a{pointer-events:auto}
 .siye-editor .mindmap-inline-note{cursor:text}
 
@@ -104,17 +107,26 @@
 .siye-editor .mindmap-rich-content blockquote { margin: 8px 0; padding: 2px 0 2px 12px; border-left: 3px solid var(--siye-line); color: var(--siye-muted); }
 
 .siye-editor .mindmap-rich-content > p:last-child:empty { min-height: 1.4em; }
-.siye-editor .mindmap-continue-after-block { display: block; min-height: 36px; margin: 6px 0; padding: 6px 10px; border: 1px solid var(--siye-line); border-radius: 6px; background: var(--siye-bg); color: var(--siye-muted); font: inherit; font-size: 13px; cursor: pointer; }
 
 .siye-editor [data-editor-id], .siye-editor me-tpc { -webkit-touch-callout: none; }
 
-.siye-editor > .mindmap-continue-after-block { position: absolute; right: 16px; bottom: calc(var(--keyboard-inset, 0px) + 64px); z-index: 19; margin: 0; min-height: 44px; box-shadow: 0 2px 8px #0002; }
-.siye-editor[data-native-keyboard="true"] > .mindmap-continue-after-block { bottom: calc(var(--keyboard-inset, 0px) + 8px); }
 
-.siye-editor .mindmap-rich-content ul[data-list-marker="dash"] > li::marker { content: "-  "; }
+/* Explicit markers also render before an empty item's first character in WebKit. */
+.siye-editor .mindmap-rich-content ul > li,
+.siye-editor .mindmap-rich-content ol > li{position:relative;list-style:none;min-height:1.55em}
+.siye-editor .mindmap-rich-content ul > li::before{content:"•";position:absolute;right:calc(100% + 8px);top:0}
+.siye-editor .mindmap-rich-content ol{counter-reset:mindmap-list}
+.siye-editor .mindmap-rich-content ol > li{counter-increment:mindmap-list}
+.siye-editor .mindmap-rich-content ol > li::before{content:counter(mindmap-list) ".";position:absolute;right:calc(100% + 6px);top:0}
+.siye-editor .mindmap-rich-content [data-task-checkbox]{display:none}
+.siye-editor .mindmap-rich-content ul[data-list-marker="task"] > li::before{content:none}
+.siye-editor .mindmap-rich-content ul[data-list-marker="task"] > li > [data-task-checkbox]{display:block;position:absolute;right:calc(100% + 5px);top:0;cursor:pointer;user-select:none;line-height:inherit;border:0;background:none;color:inherit;font:inherit;padding:0}
+.siye-editor .mindmap-rich-content ul[data-list-marker="task"] > li[data-checked="true"] > .list-item-content > p{color:var(--siye-muted);text-decoration:line-through}
+.siye-editor .mindmap-rich-content .list-item-content > p{min-height:1.55em}
 
 /* Compact, grouped palettes shared by the web and native keyboard toolbars. */
-.siye-editor .mindmap-toolbar-panel{position:absolute;bottom:calc(100% + 10px);left:50%;transform:translateX(-50%);display:block;width:272px;min-width:0;max-width:calc(100vw - 24px);padding:12px;border-radius:18px;box-sizing:border-box;overflow-y:auto;overscroll-behavior:contain;max-height:min(320px,calc(100dvh - var(--keyboard-inset,0px) - 88px));--panel-fill:#ffffff12;--panel-muted:#b9bdc9;--panel-divider:#ffffff20;--panel-danger:#ffabab;--panel-accent:#aab7ff}
+.siye-editor .mindmap-toolbar-panel{position:absolute;bottom:calc(100% + 10px);left:50%;transform:translateX(-50%);display:block;width:272px;min-width:0;max-width:calc(100vw - 24px);padding:12px;border-radius:18px;box-sizing:border-box;overflow-y:auto;overscroll-behavior:contain;max-height:min(320px,calc(100dvh - var(--keyboard-inset,0px) - 88px));background:var(--siye-bg);color:var(--siye-text);border:1px solid var(--siye-line);box-shadow:0 8px 28px #00000024;--panel-fill:var(--siye-pale);--panel-muted:var(--siye-muted);--panel-divider:var(--siye-line);--panel-danger:#c94b52;--panel-accent:var(--siye-accent)}
+.siye-editor.theme-dark .mindmap-toolbar-panel{--panel-danger:#ff959d}
 .siye-editor .mindmap-toolbar-panel input{border:1px solid var(--panel-divider);background:var(--panel-fill);color:inherit;font:inherit}
 .siye-editor .mindmap-panel-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;padding-left:4px;font-size:13px;font-weight:600}
 .siye-editor .mindmap-toolbar-icon{display:block;flex:none}
@@ -128,7 +140,8 @@
 .siye-editor .mindmap-panel-action:focus-visible{outline:2px solid var(--panel-accent);outline-offset:2px}
 .siye-editor .mindmap-toolbar-panel .mindmap-panel-action[aria-pressed=true]{color:var(--panel-accent);background:color-mix(in srgb,var(--panel-accent) 16%,transparent);border-color:color-mix(in srgb,var(--panel-accent) 30%,transparent)}
 .siye-editor .mindmap-toolbar-panel .mindmap-panel-action.is-destructive{color:var(--panel-danger)}
-.siye-editor .mindmap-toolbar-panel .mindmap-panel-action.is-primary{background:var(--panel-accent);color:#20243d}
+.siye-editor .mindmap-toolbar-panel .mindmap-panel-action.is-primary{background:var(--panel-accent);color:#fff}
+.siye-editor.theme-dark .mindmap-toolbar-panel .mindmap-panel-action.is-primary{color:#20243d}
 .siye-editor .mindmap-panel-heading .mindmap-panel-action{min-width:44px;min-height:44px;padding:0;background:none;border-radius:50%;color:var(--panel-muted)}
 .siye-editor .mindmap-panel-heading .mindmap-toolbar-icon{width:20px;height:20px}
 .siye-editor .mindmap-panel-footer{display:flex;gap:6px;justify-content:flex-end;margin-top:10px;padding-top:10px;border-top:1px solid var(--panel-divider)}
@@ -146,13 +159,11 @@
 .siye-editor .mindmap-link-fields input{width:100%;min-width:0;min-height:44px;padding:10px 12px;border-radius:10px;box-sizing:border-box;font-size:16px}
 .siye-editor .mindmap-toolbar-panel [role=alert]{display:block;padding:8px 4px 0;font-size:12px;line-height:1.4}
 @media(max-width:700px),(hover:none) and (pointer:coarse){
-  .siye-editor .mindmap-toolbar-panel{left:50%;right:auto;transform:translateX(-50%);width:272px;max-width:calc(100% - 8px);background:var(--siye-bg);color:var(--siye-text);--panel-fill:var(--siye-pale);--panel-muted:var(--siye-muted);--panel-divider:var(--siye-line);--panel-danger:#c94b52;--panel-accent:var(--siye-accent)}
-  .siye-editor.theme-dark .mindmap-toolbar-panel{--panel-danger:#ff959d}
+  .siye-editor .mindmap-toolbar-panel{left:50%;right:auto;transform:translateX(-50%);width:272px;max-width:calc(100% - 8px)}
   .siye-editor[data-native-keyboard=true] .mindmap-toolbar-panel{padding:12px;border-radius:18px}
   .siye-editor[data-native-keyboard=true] .mindmap-panel-heading{padding-left:4px;font-size:13px}
   .siye-editor[data-native-keyboard=true] .mindmap-panel-heading .mindmap-panel-action{padding:0;min-width:44px;min-height:44px;background:none}
   .siye-editor[data-native-keyboard=true] .mindmap-toolbar-panel label{padding-left:0}
-  .siye-editor .mindmap-toolbar-panel .mindmap-panel-action.is-primary{color:#fff}
   .siye-editor .mindmap-toolbar-panel input{background:var(--siye-pale);border-color:transparent;color:var(--siye-text)}
   .siye-editor[data-native-keyboard=true] .mindmap-table-size input[type=number]{padding:6px;border-radius:10px}
   .siye-editor[data-native-keyboard=true] .mindmap-link-fields input{border-radius:10px}
@@ -197,3 +208,39 @@ html[data-native-desktop="true"] .siye-editor .mindmap-controls,
 html[data-native-desktop="true"] .siye-editor:before{display:none}
 html[data-native-desktop="true"] .siye-editor .mindmap-outline-document{padding-top:28px}
 html[data-native-desktop="true"] .siye-editor .mind-elixir-toolbar.lt{top:16px}
+
+/* Desktop toolbars share the document's theme and a single control style. */
+@media(min-width:701px){
+  .siye-editor:not([data-native-keyboard="true"]) .mindmap-node-toolbar,
+  .siye-editor:not([data-native-keyboard="true"]) .mindmap-toolbar-panel{
+    background:var(--siye-bg);color:var(--siye-text);border:1px solid var(--siye-line);
+    border-radius:12px;padding:6px;gap:6px;box-shadow:0 4px 16px #00000012;
+    color-scheme:light;
+  }
+  .siye-editor.theme-dark:not([data-native-keyboard="true"]) .mindmap-node-toolbar,
+  .siye-editor.theme-dark:not([data-native-keyboard="true"]) .mindmap-toolbar-panel{color-scheme:dark;box-shadow:0 4px 16px #00000030}
+  .siye-editor:not([data-native-keyboard="true"]) .mindmap-toolbar-actions,
+  .siye-editor:not([data-native-keyboard="true"]) .mindmap-panel-content{gap:4px}
+  .siye-editor:not([data-native-keyboard="true"]) .mindmap-node-toolbar button,
+  .siye-editor:not([data-native-keyboard="true"]) .mindmap-image-picker{
+    display:flex;align-items:center;justify-content:center;box-sizing:border-box;
+    flex:0 0 36px;width:36px;min-width:36px;height:36px;min-height:36px;padding:8px;
+    border:1px solid transparent;border-radius:7px;background:transparent;color:var(--siye-text);
+  }
+  .siye-editor:not([data-native-keyboard="true"]) .mindmap-node-toolbar .mindmap-toolbar-icon{width:18px;height:18px}
+  .siye-editor:not([data-native-keyboard="true"]) .mindmap-node-toolbar button:hover,
+  .siye-editor:not([data-native-keyboard="true"]) .mindmap-image-picker:hover{background:var(--siye-pale)}
+  .siye-editor:not([data-native-keyboard="true"]) .mindmap-toolbar-actions button[aria-expanded="true"]{
+    background:color-mix(in srgb,var(--siye-accent) 16%,transparent);color:var(--siye-accent);border-color:color-mix(in srgb,var(--siye-accent) 30%,transparent);
+  }
+  .siye-editor:not([data-native-keyboard="true"]) .mindmap-toolbar-actions button:focus-visible,
+  .siye-editor:not([data-native-keyboard="true"]) .mindmap-image-picker:focus-within{outline:2px solid var(--siye-accent);outline-offset:1px}
+  .siye-editor:not([data-native-keyboard="true"]) .mindmap-toolbar-separator{background:var(--siye-line);height:20px;margin:0 2px;flex:0 0 1px}
+  .siye-editor:not([data-native-keyboard="true"]) .mindmap-panel-close .mindmap-panel-action{color:var(--siye-muted)}
+  .siye-editor:not([data-native-keyboard="true"]) .mindmap-panel-action.is-destructive{color:var(--panel-danger)}
+  .siye-editor:not([data-native-keyboard="true"]) .mindmap-panel-action[aria-pressed="true"]{color:var(--panel-accent);background:color-mix(in srgb,var(--panel-accent) 16%,transparent)}
+  .siye-editor:not([data-native-keyboard="true"]) .mindmap-panel-action.is-primary{background:var(--panel-accent);color:#fff}
+  .siye-editor.theme-dark:not([data-native-keyboard="true"]) .mindmap-panel-action.is-primary{color:#20243d}
+  .siye-editor:not([data-native-keyboard="true"]) .mindmap-toolbar-panel input{height:36px;min-height:36px;font-size:13px}
+  .siye-editor:not([data-native-keyboard="true"]) .mindmap-node-toolbar .mindmap-keyboard-dismiss{display:none}
+}

@@ -3,6 +3,55 @@ import XCTest
 @testable import ExcalidrawShared
 
 final class DocumentSaveTests: XCTestCase {
+    func testOldCanvasSaveAfterCreatingDocumentKeepsDocumentsIndependent() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let repository = root.appendingPathComponent("Repository", isDirectory: true)
+        try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let suiteName = UUID().uuidString
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = FolderSourceStore(userDefaults: defaults, indexStore: ExcalidrawJSONFileIndexStore(fileURL: root.appendingPathComponent("index.json")))
+        let manager = DocumentManager(store: store, draftDirectory: root.appendingPathComponent("drafts"))
+        try manager.addFolder(url: repository)
+        let sourceReady = expectation(description: "Source published")
+        DispatchQueue.main.async { sourceReady.fulfill() }
+        wait(for: [sourceReady], timeout: 3)
+
+        var scenes: [DocumentScene] = []
+        for _ in 0..<2 {
+            let created = expectation(description: "Mind map created")
+            manager.createBlankDocument(type: .mindmap) { result in
+                do { scenes.append(try result.get()) } catch { XCTFail(error.localizedDescription) }
+                created.fulfill()
+            }
+            wait(for: [created], timeout: 3)
+        }
+        let old = scenes[0], new = scenes[1]
+        let newEntry = try XCTUnwrap(manager.currentEntry)
+        let blankData = try Data(contentsOf: newEntry.fileURL)
+        let oldSaved = expectation(description: "Old canvas flush acknowledged")
+        // The WebView still contains the old document when creation activates the new file.
+        manager.saveScene(docId: old.docId, sceneJson: ["marker": "old edit"]) { result in
+            if case .failure(let error) = result { XCTFail(error.localizedDescription) }
+            XCTAssertEqual(manager.currentEntry?.id, newEntry.id)
+            oldSaved.fulfill()
+        }
+        wait(for: [oldSaved], timeout: 3)
+        XCTAssertEqual(try Data(contentsOf: newEntry.fileURL), blankData)
+        let newSaved = expectation(description: "New document saved independently")
+        manager.saveScene(docId: new.docId, sceneJson: ["marker": "new edit"]) { result in
+            if case .failure(let error) = result { XCTFail(error.localizedDescription) }
+            XCTAssertEqual(manager.currentEntry?.id, newEntry.id)
+            newSaved.fulfill()
+        }
+        wait(for: [newSaved], timeout: 3)
+        for (scene, marker) in [(old, "old edit"), (new, "new edit")] {
+            let json = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: scene.docId))) as? [String: String]
+            XCTAssertEqual(json?["marker"], marker)
+        }
+    }
+
     func testRawBridgeJSONSavesAndInvalidJSONDoesNotReplaceDocument() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
