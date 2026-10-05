@@ -246,7 +246,7 @@ struct ContentView: View {
                         .padding(10).background(.regularMaterial).cornerRadius(8).padding()
                 }
             }
-            .navigationTitle("Siye")
+            .navigationTitle("")
         }
         .task {
             guard !didStartUp else { return }
@@ -296,6 +296,9 @@ struct ContentView: View {
             }
         }
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                DesktopEditorToolbar(viewModel: viewModel)
+            }
             ToolbarItem(placement: .navigation) {
                 Button {
                     withAnimation(.easeInOut(duration: 0.15)) {
@@ -589,7 +592,19 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
     @Published var styleStatusText: String = "Styles loading..."
     @Published var isStyleReady = false
     @Published var hasUnsavedChanges = false
+    @Published var editorKind = "drawing"
+    @Published var editorViewMode = "outline"
+    @Published var activeDrawingTool = "selection"
+    @Published var drawingToolLocked = false
+    @Published var editorReadOnly = false
     let webView: WKWebView
+
+    func performToolbarAction(_ action: String, value: String? = nil) {
+        var payload: [String: Any] = ["action": action]
+        if let value { payload["value"] = value }
+        webView.window?.makeFirstResponder(webView)
+        send(type: "desktopToolbarAction", payload: payload)
+    }
 
     private var currentDocumentID: String?
     private var sceneGeneration = 0
@@ -706,7 +721,14 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
     }
 
     private func handleMessage(type: String, payload: [String: Any]) {
-        if type == "saveScene" {
+        if type == "desktopToolbarState" {
+            guard (payload["docId"] as? String ?? "") == (currentDocumentID ?? "") else { return }
+            editorKind = payload["kind"] as? String ?? "drawing"
+            editorViewMode = payload["viewMode"] as? String ?? "outline"
+            activeDrawingTool = payload["activeTool"] as? String ?? "selection"
+            drawingToolLocked = payload["locked"] as? Bool ?? false
+            editorReadOnly = payload["readOnly"] as? Bool ?? false
+        } else if type == "saveScene" {
             handleSave(payload: payload)
         } else if type == "openLink" {
             if let value = payload["url"] as? String, let url = URL(string: value), ["https", "http", "mailto"].contains(url.scheme?.lowercased() ?? "") {
@@ -1155,6 +1177,7 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
         (() => {
           window.__XEXCALIDRAW_THEME = "\(theme)";
           const html = document.documentElement;
+          html.dataset.nativeDesktop = "true";
           html.style.colorScheme = "\(colorScheme)";
           html.style.backgroundColor = "\(backgroundColor)";
           const applyBody = () => {
@@ -1245,6 +1268,7 @@ final class WebViewContainer: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        window?.titleVisibility = .hidden
         if let window, !(window.delegate is SiyeWindowDelegate), let model = webView?.navigationDelegate as? WebCanvasViewModel {
             let delegate = SiyeWindowDelegate(model: model, original: window.delegate)
             closeDelegate = delegate
@@ -1321,5 +1345,79 @@ final class SiyeApplicationDelegate: NSObject, NSApplicationDelegate {
             }
         }
         return .terminateLater
+    }
+}
+
+
+private struct DesktopEditorToolbar: View {
+    @ObservedObject var viewModel: WebCanvasViewModel
+
+    private let tools: [(type: String, symbol: String, label: String)] = [
+        ("hand", "hand.draw", "Hand"),
+        ("selection", "cursorarrow", "Selection"),
+        ("rectangle", "rectangle", "Rectangle"),
+        ("diamond", "diamond", "Diamond"),
+        ("ellipse", "circle", "Ellipse"),
+        ("arrow", "arrow.up.right", "Arrow"),
+        ("line", "line.diagonal", "Line"),
+        ("freedraw", "pencil.tip", "Draw"),
+        ("text", "textformat", "Text"),
+        ("image", "photo", "Insert image"),
+        ("eraser", "eraser", "Eraser")
+    ]
+
+    var body: some View {
+        if viewModel.editorKind == "mindmap" {
+            Picker("文档视图", selection: Binding(
+                get: { viewModel.editorViewMode },
+                set: { viewModel.performToolbarAction("view", value: $0) }
+            )) {
+                Text("大纲").tag("outline")
+                Text("思维导图").tag("map")
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 168)
+            .accessibilityIdentifier("document-view-switcher")
+        } else if !viewModel.editorReadOnly {
+            HStack(spacing: 2) {
+                toolButton("lock", symbol: viewModel.drawingToolLocked ? "lock.fill" : "lock.open", label: "Keep selected tool active", selected: viewModel.drawingToolLocked)
+                Divider().frame(height: 20).padding(.horizontal, 3)
+                ForEach(tools, id: \.type) { tool in
+                    toolButton("tool", value: tool.type, symbol: tool.symbol, label: tool.label, selected: viewModel.activeDrawingTool == tool.type)
+                }
+                Menu {
+                    Button("Frame") { viewModel.performToolbarAction("tool", value: "frame") }
+                    Button("Embed") { viewModel.performToolbarAction("tool", value: "embeddable") }
+                    Button("Laser pointer") { viewModel.performToolbarAction("tool", value: "laser") }
+                    Divider()
+                    Button("Library") { viewModel.performToolbarAction("library") }
+                } label: {
+                    Image(systemName: "ellipsis").frame(width: 24, height: 28)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("More tools")
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Drawing tools")
+        } else {
+            Button("Library") { viewModel.performToolbarAction("library") }
+        }
+    }
+
+    private func toolButton(_ action: String, value: String? = nil, symbol: String, label: String, selected: Bool) -> some View {
+        Button {
+            viewModel.performToolbarAction(action, value: value)
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 14))
+                .frame(width: 28, height: 28)
+                .background(selected ? Color.accentColor.opacity(0.18) : Color.clear)
+                .cornerRadius(6)
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel(label)
+        .accessibilityValue(selected ? "Selected" : "")
+        .help(label)
     }
 }

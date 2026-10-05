@@ -52,6 +52,34 @@ interface BridgeEnvelope {
 
 ## Web → Native
 
+### desktopToolbarState (macOS)
+
+The web editor reports the current document and toolbar selection. The native host ignores reports for another `docId`. Drawing reports are sent only when the tool, lock, document, or read-only state changes.
+
+```ts
+{
+  docId: string;
+  kind: "drawing" | "mindmap";
+  readOnly: boolean;
+  activeTool?: string;
+  locked?: boolean;
+  viewMode?: "outline" | "map";
+}
+```
+
+The macOS bootstrap sets `document.documentElement.dataset.nativeDesktop = "true"`. Only this host replaces the web drawing toolbar and view tabs with native title-bar controls.
+
+### desktopToolbarAction (Native → Web, macOS)
+
+```ts
+{
+  action: "tool" | "lock" | "library" | "view";
+  value?: string;
+}
+```
+
+`tool` selects a supported Excalidraw tool; `lock` toggles tool locking; `library` toggles the default sidebar's library tab. `view` accepts `outline` or `map` and flushes pending mind-map edits before switching. Drawing mutations are ignored in read-only documents. Drawing commands return keyboard focus to the canvas so existing shortcuts remain usable.
+
 ### didChange
 ```json
 {

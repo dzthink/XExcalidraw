@@ -191,3 +191,9 @@
   .siye-editor[data-native-keyboard=true] .mindmap-link-fields input,
   .siye-editor[data-native-keyboard=true] .mindmap-table-size input[type=number]{border-radius:8px;padding:4px}
 }
+
+/* The document view switcher lives in the native macOS title bar. */
+html[data-native-desktop="true"] .siye-editor .mindmap-controls,
+html[data-native-desktop="true"] .siye-editor:before{display:none}
+html[data-native-desktop="true"] .siye-editor .mindmap-outline-document{padding-top:28px}
+html[data-native-desktop="true"] .siye-editor .mind-elixir-toolbar.lt{top:16px}

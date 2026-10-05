@@ -17,6 +17,8 @@ import {
 } from "./bridge";
 import type {
   AppStateUpdate,
+  DesktopToolbarActionPayload,
+  DesktopToolbarStatePayload,
   LoadScenePayload,
   RequestExportPayload,
   SaveScenePayload,
@@ -208,11 +210,51 @@ export default function App() {
     [normalizeScene]
   );
 
+  const lastToolbarState = useRef("");
+  const reportToolbarState = useCallback((appState: ReturnType<ExcalidrawImperativeAPI["getAppState"]>) => {
+    if (document.documentElement.dataset.nativeDesktop !== "true" || loadState.docId.toLowerCase().endsWith(".mindmap")) return;
+    const payload: DesktopToolbarStatePayload = {
+      docId: loadState.docId,
+      kind: "drawing",
+      readOnly: loadState.readOnly,
+      activeTool: appState.activeTool.type,
+      locked: appState.activeTool.locked
+    };
+    const signature = JSON.stringify(payload);
+    if (lastToolbarState.current === signature) return;
+    lastToolbarState.current = signature;
+    sendToNative(sendEnvelope("desktopToolbarState", payload));
+  }, [loadState.docId, loadState.readOnly]);
+
+  useEffect(() => {
+    if (isApiReady && excalidrawApi.current) reportToolbarState(excalidrawApi.current.getAppState());
+  }, [isApiReady, reportToolbarState]);
+
   const handleBridgeMessage = useCallback(
     async (message: { type: string; payload: unknown }) => {
       if (message.type === "saveResult") {
         const result = message.payload as { requestId?: string; success?: boolean };
         if (result.requestId) saveRequests.current.get(result.requestId)?.(result.success === true);
+        return;
+      }
+      if (message.type === "desktopToolbarAction") {
+        if (loadState.docId.toLowerCase().endsWith(".mindmap")) return;
+        const api = excalidrawApi.current;
+        if (!api) return;
+        const payload = message.payload as DesktopToolbarActionPayload;
+        if (payload.action === "library") {
+          api.toggleSidebar({ name: "default", tab: "library" });
+        } else if (!loadState.readOnly) {
+          const activeTool = api.getAppState().activeTool;
+          if (payload.action === "lock") {
+            api.updateScene({ appState: { activeTool: { ...activeTool, locked: !activeTool.locked } } });
+          } else if (payload.action === "tool") {
+            const tool = (["hand", "selection", "rectangle", "diamond", "ellipse", "arrow", "line", "freedraw", "text", "image", "eraser", "frame", "embeddable", "laser"] as const).find(type => type === payload.value);
+            if (tool) api.setActiveTool({ type: tool, locked: activeTool.locked });
+          }
+          reportToolbarState(api.getAppState());
+          document.querySelector<HTMLElement>(".excalidraw")?.focus({ preventScroll: true });
+        }
         return;
       }
       if (message.type === "loadScene") {
@@ -328,7 +370,7 @@ export default function App() {
         }
       }
     },
-    [coerceSceneJson]
+    [coerceSceneJson, loadState.docId, loadState.readOnly, reportToolbarState]
   );
 
   useEffect(() => {
@@ -438,7 +480,8 @@ export default function App() {
             toggleTheme: false
           }
         }}
-        onChange={() => {
+        onChange={(_elements, appState) => {
+          reportToolbarState(appState);
           if (
             !loadState.docId ||
             loadState.readOnly ||

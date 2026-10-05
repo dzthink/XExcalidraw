@@ -5,6 +5,7 @@ import { EditorView } from "prosemirror-view";
 import { TextSelection, AllSelection } from "prosemirror-state";
 import { splitListItem } from "prosemirror-schema-list";
 import { addBridgeListener, sendEnvelope, sendToNative } from "./bridge";
+import type { DesktopToolbarActionPayload, DesktopToolbarStatePayload } from "./types";
 import MindMapOutline from "./MindMapOutline";
 import RichEditor, { type EditorHandle } from "./mindmap/RichEditor";
 import NodeToolbar from "./mindmap/NodeToolbar";
@@ -405,6 +406,23 @@ export default function MindMapEditor(props: Props) {
   });
   const focus = (id: string | null) => { setEditing(null); activeRef.current = null; setActive(null); updateView(document => { document.views.focusId = id === document.nodeData.id ? null : id; document.views.selectedIds = id ? [id] : []; }); };
   const switchView = async (nextMode: "outline" | "map") => { if (mode === nextMode || !(await flush())) return; setEditing(null); activeRef.current = null; setActive(null); updateView(document => { document.views.mode = nextMode; }); };
+  const switchViewRef = useRef(switchView);
+  switchViewRef.current = switchView;
+  useEffect(() => {
+    if (document.documentElement.dataset.nativeDesktop !== "true") return;
+    const payload: DesktopToolbarStatePayload = { docId: props.docId, kind: "mindmap", viewMode: mode, readOnly: props.readOnly };
+    sendToNative(sendEnvelope("desktopToolbarState", payload));
+  }, [props.docId, props.readOnly, mode]);
+  useEffect(() => {
+    const removeListener = addBridgeListener(message => {
+      if (message.type !== "desktopToolbarAction") return;
+      const payload = message.payload as DesktopToolbarActionPayload;
+      if (payload.action === "view" && (payload.value === "outline" || payload.value === "map")) {
+        void switchViewRef.current(payload.value);
+      }
+    });
+    return () => { removeListener(); };
+  }, []);
   if (!store || !doc || !root) return <div className="mindmap-unsupported" role="alert"><h2>此文档使用旧版或不支持的思维导图格式</h2><p>请新建思维导图。原文件保持不变。</p></div>;
   const editNode = editing ? store.node(editing) : null;
   return <div ref={editorHost} className={`mindmap-editor siye-editor theme-${props.theme} palette-${doc.settings.palette}`}

@@ -83,6 +83,7 @@ export type AttachmentSaveFailedPayload = {
 };
 
 export type NativeToWebMessage =
+  | BridgeEnvelope<DesktopToolbarActionPayload>
   | BridgeEnvelope<LoadScenePayload>
   | BridgeEnvelope<UpdateDocIdPayload>
   | BridgeEnvelope<SetAppStatePayload>
@@ -92,6 +93,7 @@ export type NativeToWebMessage =
   | BridgeEnvelope<AttachmentSaveFailedPayload>;
 
 export type WebToNativeMessage =
+  | BridgeEnvelope<DesktopToolbarStatePayload>
   | BridgeEnvelope<Record<string, unknown>>
   | BridgeEnvelope<DidChangePayload>
   | BridgeEnvelope<SaveScenePayload>
@@ -100,3 +102,17 @@ export type WebToNativeMessage =
   | BridgeEnvelope<ExportResultPayload>
   | BridgeEnvelope<SaveAttachmentPayload>
   | BridgeEnvelope<{ cursor: string }>;
+
+export type DesktopToolbarActionPayload = {
+  action: "tool" | "lock" | "library" | "view";
+  value?: string;
+};
+
+export type DesktopToolbarStatePayload = {
+  docId: string;
+  kind: "drawing" | "mindmap";
+  readOnly: boolean;
+  activeTool?: string;
+  locked?: boolean;
+  viewMode?: "outline" | "map";
+};
