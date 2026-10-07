@@ -14,6 +14,11 @@ export type LoadScenePayload = {
   readOnly: boolean;
 };
 
+export type SyncScenePayload = {
+  docId: string;
+  sceneJson: Record<string, unknown> | string;
+};
+
 export type AppStateUpdateKeys =
   | "theme"
   | "viewModeEnabled"
@@ -85,6 +90,7 @@ export type AttachmentSaveFailedPayload = {
 export type NativeToWebMessage =
   | BridgeEnvelope<DesktopToolbarActionPayload>
   | BridgeEnvelope<LoadScenePayload>
+  | BridgeEnvelope<SyncScenePayload>
   | BridgeEnvelope<UpdateDocIdPayload>
   | BridgeEnvelope<SetAppStatePayload>
   | BridgeEnvelope<RequestExportPayload>
@@ -93,7 +99,6 @@ export type NativeToWebMessage =
   | BridgeEnvelope<AttachmentSaveFailedPayload>;
 
 export type WebToNativeMessage =
-  | BridgeEnvelope<NodeInteractionStatePayload>
   | BridgeEnvelope<DesktopToolbarStatePayload>
   | BridgeEnvelope<Record<string, unknown>>
   | BridgeEnvelope<DidChangePayload>
@@ -107,13 +112,6 @@ export type WebToNativeMessage =
 export type DesktopToolbarActionPayload = {
   action: "tool" | "lock" | "library" | "view";
   value?: string;
-};
-
-export type NodeInteractionStatePayload = {
-  docId: string;
-  viewMode: "outline" | "map";
-  editingId: string | null;
-  readOnly: boolean;
 };
 
 export type DesktopToolbarStatePayload = {

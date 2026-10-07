@@ -6,13 +6,15 @@ import { EditorView } from "prosemirror-view";
 import { TextSelection, AllSelection } from "prosemirror-state";
 import { splitUnfinishedListItem } from "./mindmap/list";
 import { addBridgeListener, sendEnvelope, sendToNative } from "./bridge";
-import type { DesktopToolbarActionPayload, DesktopToolbarStatePayload, NodeInteractionStatePayload } from "./types";
+import type { DesktopToolbarActionPayload, DesktopToolbarStatePayload } from "./types";
 import MindMapOutline from "./MindMapOutline";
 import RichEditor, { type EditorHandle } from "./mindmap/RichEditor";
 import NodeToolbar from "./mindmap/NodeToolbar";
+import MobileNodeToolbar from "./mindmap/MobileNodeToolbar";
 import { refreshRichTextLinks } from "./mindmap/links";
 import { trackKeyboardViewport } from "./mindmap/keyboardViewport";
 import { allowsNodeLongPress } from "./mindmap/nodeInteraction";
+import { installNodeDrag } from "./mindmap/nodeDrag";
 import { DocumentStore, parseDocument, newDocument, findNode, parentOf, visibleNodes, structure, moveNodes, newNode, descendantCount, type MapDocument, type MapNode, type Cursor, type RichDocument, type StructureAction } from "./mindmap/document";
 import { readContent, renderContent, contentText, schema, safeLink } from "./mindmap/richText";
 import "mind-elixir/style.css";
@@ -32,14 +34,9 @@ export default function MindMapEditor(props: Props) {
   const [editing, setEditing] = useState<string | null>(null);
   const [restore, setRestore] = useState<Cursor | null>(null), [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [active, setActive] = useState<EditorHandle | null>(null), [error, setError] = useState(""), [saving, setSaving] = useState(false);
-  const [nodeMenu, setNodeMenu] = useState<{ id: string; x: number; y: number } | null>(null);
-  const longPress = useRef<{ timer: number; x: number; y: number } | null>(null);
   const suppressTap = useRef(false);
-  const cancelLongPress = () => {
-    if (longPress.current) window.clearTimeout(longPress.current.timer);
-    longPress.current = null;
-  };
-  useEffect(() => () => cancelLongPress(), []);
+  const [touchUI, setTouchUI] = useState(() => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || navigator.maxTouchPoints > 0 && window.matchMedia("(pointer: coarse)").matches);
+  const [draggingNode, setDraggingNode] = useState(false);
   const editorHost = useRef<HTMLDivElement>(null);
   const host = useRef<HTMLDivElement>(null), mind = useRef<MindElixir | null>(null), activeRef = useRef<EditorHandle | null>(null);
   const latest = useRef(props); latest.current = props;
@@ -55,33 +52,9 @@ export default function MindMapEditor(props: Props) {
   const doc = store?.document, mode = doc?.views.mode ?? "outline";
   const interaction = useRef({ mode, editing, readOnly: props.readOnly });
   interaction.current = { mode, editing, readOnly: props.readOnly };
-  useLayoutEffect(() => {
-    cancelLongPress(); suppressTap.current = false; setNodeMenu(null);
-    const payload: NodeInteractionStatePayload = { docId: props.docId, viewMode: mode, editingId: editing, readOnly: props.readOnly };
-    sendToNative(sendEnvelope("nodeInteractionState", payload));
-  }, [mode, editing, props.readOnly, props.docId]);
   const root = doc && (doc.views.focusId ? findNode(doc.nodeData, doc.views.focusId) : null) || doc?.nodeData;
-  const selected = doc?.views.selectedIds ?? [], selectedId = selected[0] ?? active?.id;
+  const selected = doc?.views.selectedIds ?? [], selectedId = selected[0] ?? active?.id ?? doc?.views.focusId ?? undefined;
   const callbacks = useRef({} as { focus: (id: string | null) => void; select: (id: string, multiple?: boolean) => void; edit: (id: string, atEnd?: boolean) => void; action: (action: StructureAction, ids?: string[]) => void; move: (ids: string[], target: string, placement: "before" | "after" | "inside") => void; change: (fn: (doc: MapDocument) => void, group?: string | null) => void; view: (fn: (doc: MapDocument) => void) => void });
-  useEffect(() => {
-    const nativePress = (event: Event) => {
-      const state = interaction.current;
-      if (state.mode !== "map" || state.readOnly) return;
-      const { x, y } = (event as CustomEvent<{ x: number; y: number }>).detail;
-      const target = document.elementFromPoint(x, y);
-      if (!target || target.closest('button,input,textarea,[contenteditable="true"],.mindmap-node-edit-content,.mindmap-node-menu')) return;
-      const topic = target.closest("me-tpc") as Topic | null;
-      const id = topic?.nodeObj.id ?? null;
-      if (!allowsNodeLongPress(state.mode, state.editing, id, state.readOnly)) return;
-      if (!id) return;
-      cancelLongPress();
-      (document.activeElement as HTMLElement | null)?.blur();
-      callbacks.current.select(id);
-      setNodeMenu({ id, x, y });
-    };
-    window.addEventListener("siye-node-long-press", nativePress);
-    return () => window.removeEventListener("siye-node-long-press", nativePress);
-  }, []);
   const request = (type: string, payload: Record<string, unknown>): Promise<Record<string, unknown>> => new Promise((resolve, reject) => {
     const requestId = crypto.randomUUID();
     const timeout = window.setTimeout(() => { pending.current.delete(requestId); reject(new Error("保存未收到应用确认，请重试")); }, 10000);
@@ -220,6 +193,18 @@ export default function MindMapEditor(props: Props) {
   };
   useEffect(() => {
     const unsubscribe = addBridgeListener(message => {
+      if (message.type === "syncScene") {
+        const payload = message.payload as import("./types").SyncScenePayload;
+        if (payload.docId !== latest.current.docId || !store || store.revision !== savedRevision.current || flight.current || uploads.current.size) return;
+        let data: Props["data"];
+        try { data = typeof payload.sceneJson === "string" ? JSON.parse(payload.sceneJson) : payload.sceneJson; } catch { return; }
+        const document = validated(data);
+        if (!document) return;
+        captureMap(); store.replaceFromExternal(document);
+        setEditing(null); activeRef.current = null; setActive(null);
+        update();
+        return;
+      }
       if (!["saveResult", "attachmentSaved", "attachmentSaveFailed"].includes(message.type)) return;
       const payload = message.payload as Record<string, unknown>, requestId = String(payload.requestId); const task = pending.current.get(requestId); if (!task) return;
       clearTimeout(task.timeout); pending.current.delete(requestId);
@@ -350,6 +335,7 @@ export default function MindMapEditor(props: Props) {
       }
     });
     mind.current = instance; syncing.current = true; instance.init(mapData()); syncing.current = false;
+    instance.container.querySelector(".mind-elixir-toolbar #fullscreen")?.remove();
     // A solid background hit region avoids expensive WebKit region unions.
     // Its class preserves the library's empty-canvas selection and pan gestures.
     const background = document.createElement("div");
@@ -374,8 +360,27 @@ export default function MindMapEditor(props: Props) {
     instance.bus.addListener("changeDirection", direction => { callbacks.current.change(document => { document.settings.layout = direction === MindElixir.LEFT ? "left" : direction === MindElixir.RIGHT ? "right" : direction === MindElixir.DOWN ? "down" : "side"; }); });
     const observe = new ResizeObserver(() => resize()); observe.observe(instance.nodes);
     indexTopics(instance); shape.current = mapShape();
+    const removeNodeDrag = installNodeDrag({
+      host: host.current, overlayHost: editorHost.current!,
+      root: () => store.document.views.focusId ? findNode(store.document.nodeData, store.document.views.focusId) ?? store.document.nodeData : store.document.nodeData,
+      topics: () => topicElements.current, scale: () => instance.scaleVal,
+      canStart: id => allowsNodeLongPress(interaction.current.mode, interaction.current.editing, id, interaction.current.readOnly) && !instance.spacePressed,
+      pan: (dx, dy) => { instance.move(dx, dy); },
+      press: id => {
+        callbacks.current.select(id);
+        const topic = topicElements.current.get(id);
+        if (topic) { syncing.current = true; instance.selectNode(topic); syncing.current = false; }
+      },
+      start: id => {
+        setDraggingNode(true); suppressTap.current = true;
+        const menu = instance.container.querySelector<HTMLElement>(".context-menu"); if (menu) menu.hidden = true;
+        callbacks.current.select(id);
+      },
+      move: (id, parentId) => callbacks.current.move([id], parentId, "inside"),
+      end: () => { setDraggingNode(false); }
+    });
     props.onReady(instance); update();
-    return () => { captureMap(); observe.disconnect(); instance.destroy(); mind.current = null; shape.current = ""; topicElements.current.clear(); setAnchor(null); props.onReady(null); };
+    return () => { removeNodeDrag(); captureMap(); observe.disconnect(); instance.destroy(); mind.current = null; shape.current = ""; topicElements.current.clear(); setAnchor(null); props.onReady(null); };
   }, [mode]);
   useLayoutEffect(() => {
     const instance = mind.current; if (!instance || !store || !root || mode !== "map") return;
@@ -451,49 +456,21 @@ export default function MindMapEditor(props: Props) {
   if (!store || !doc || !root) return <div className="mindmap-unsupported" role="alert"><h2>此文档使用旧版或不支持的思维导图格式</h2><p>请新建思维导图。原文件保持不变。</p></div>;
   const editNode = editing ? store.node(editing) : null;
   return <div ref={editorHost} data-map-editing={mode === "map" && editing !== null} className={`mindmap-editor siye-editor theme-${props.theme} palette-${doc.settings.palette}`}
-    onTouchStartCapture={event => {
-      cancelLongPress();
-      suppressTap.current = false;
-      if (event.touches.length !== 1 || mode !== "map" || props.readOnly) return;
-      const target = event.target as HTMLElement;
-      if (target.closest('button,input,textarea,[contenteditable="true"],.mindmap-node-edit-content,.mindmap-node-menu')) return;
-      const topic = target.closest("me-tpc") as Topic | null;
-      const id = topic?.nodeObj.id ?? null;
-      if (!allowsNodeLongPress(mode, editing, id, props.readOnly) || !id) { setNodeMenu(null); return; }
-      const { clientX: x, clientY: y } = event.touches[0];
-      longPress.current = { x, y, timer: window.setTimeout(() => {
-        longPress.current = null;
-        const state = interaction.current;
-        if (!allowsNodeLongPress(state.mode, state.editing, id, state.readOnly)) return;
-        suppressTap.current = true;
-        (document.activeElement as HTMLElement | null)?.blur();
-        select(id);
-        setNodeMenu({ id, x, y });
-      }, 350) };
-    }}
-    onTouchMoveCapture={event => {
-      const press = longPress.current, touch = event.touches[0];
-      if (press && (!touch || event.touches.length !== 1 || Math.hypot(touch.clientX - press.x, touch.clientY - press.y) > 10)) cancelLongPress();
-      if (suppressTap.current) event.preventDefault();
-    }}
-    onTouchEndCapture={event => { cancelLongPress(); if (suppressTap.current) event.preventDefault(); }}
-    onTouchCancelCapture={() => { cancelLongPress(); suppressTap.current = false; }}
-    onClickCapture={event => { if ((event.target as HTMLElement).closest(".mindmap-node-menu")) { suppressTap.current = false; return; } if (suppressTap.current) { suppressTap.current = false; event.preventDefault(); event.stopPropagation(); } }}
+    onPointerDownCapture={event => { if (event.pointerType === "touch") setTouchUI(true); suppressTap.current = false; }}
+    onClickCapture={event => { if (suppressTap.current) { suppressTap.current = false; event.preventDefault(); event.stopPropagation(); } }}
     onContextMenuCapture={event => {
       const topic = (event.target as HTMLElement).closest("me-tpc") as Topic | null;
       if (mode === "outline" || topic?.nodeObj.id === editing) { event.stopPropagation(); return; }
       if ((event.target as HTMLElement).closest('[contenteditable="true"],input,textarea,.mindmap-node-edit-content')) {
         event.stopPropagation(); return;
       }
-      if (nodeMenu || longPress.current) { event.preventDefault(); event.stopPropagation(); }
+      if (touchUI && topic) { event.preventDefault(); event.stopPropagation(); }
     }}
     onPointerDown={event => {
-    if (!(event.target as HTMLElement).closest(".mindmap-node-menu")) { setNodeMenu(null); suppressTap.current = false; }
-    if ((event.target as HTMLElement).closest("me-tpc,.context-menu,.mind-elixir-toolbar,.outline-row,.outline-title,.mindmap-node-toolbar,.mindmap-controls,.mindmap-settings,.mindmap-breadcrumbs")) return;
+    if ((event.target as HTMLElement).closest("me-tpc,.context-menu,.mind-elixir-toolbar,.outline-row,.outline-title,.mindmap-node-toolbar,.mindmap-controls,.mindmap-settings")) return;
     if (!selected.length && !editing) return;
     setEditing(null); activeRef.current = null; setActive(null); updateView(document => { document.views.selectedIds = []; });
   }}>
-    {doc.views.focusId && <nav className="mindmap-breadcrumbs" aria-label="节点导航"><button onClick={() => focus(parentOf(doc.nodeData, root.id)?.id ?? null)}>返回上级</button></nav>}
     <div className="mindmap-controls" role="tablist" aria-label="文档视图">
       <button role="tab" aria-selected={mode === "outline"} onClick={() => { void switchView("outline"); }}>大纲</button>
       <button role="tab" aria-selected={mode === "map"} onClick={() => { void switchView("map"); }}>思维导图</button>
@@ -510,6 +487,9 @@ export default function MindMapEditor(props: Props) {
       const menuEvent = new MouseEvent("contextmenu", { clientX: event.clientX, clientY: event.clientY });
       Object.defineProperty(menuEvent, "target", { value: topic });
       instance.bus.fire("showContextMenu", menuEvent);
+      const focused = !!store.document.views.focusId;
+      instance.container.querySelector("#cm-fucus")?.classList.toggle("disabled", focused);
+      instance.container.querySelector("#cm-unfucus")?.classList.toggle("disabled", !focused);
     }} onPointerDownCapture={event => {
       // Native layout/fold commands replace nodes synchronously. Detach the editor first.
       if ((event.target as HTMLElement).closest(".mind-elixir-toolbar.lt,me-epd") && anchor) {
@@ -528,15 +508,12 @@ export default function MindMapEditor(props: Props) {
     {mode === "map" && anchor?.isConnected && editNode && (anchor as HTMLElement & { nodeObj: NodeObj }).nodeObj.id === editNode.id && createPortal(<div className="mindmap-node-edit-content" onPointerDown={event => event.stopPropagation()}>
       <RichEditor id={editNode.id} content={editNode.content} docId={props.docId} readOnly={props.readOnly} label="节点正文" onChange={(value, before, after) => content(editNode.id, value, before, after)} onActive={onActive} onBlur={() => { store.boundary(); void flush(); }} onKey={(view, event) => onKey(editNode.id, view, event)} onDoubleEnter={() => onDoubleEnter(editNode.id)} onImage={upload} onResize={() => resize(editing ?? undefined)} restore={restore} />
     </div>, anchor)}
-    {(selected.length > 0 || active) && <NodeToolbar getEditor={ensureEditor} active={active} action={action} focusNode={() => focus(selectedId)} image={upload} undo={() => undo()} redo={() => undo(true)} boundary={() => store.boundary()} readOnly={props.readOnly} />}
-    {nodeMenu && !props.readOnly && <div className="mindmap-node-menu-backdrop" onPointerDown={event => { event.stopPropagation(); setNodeMenu(null); }}>
-      <div className="mindmap-node-menu" role="menu" aria-label="节点操作" style={{ left: Math.max(8, Math.min(nodeMenu.x, window.innerWidth - 192)), top: Math.max(8, Math.min(nodeMenu.y, window.innerHeight - 400)) }} onPointerDown={event => event.stopPropagation()}>
-        <button role="menuitem" onClick={() => { edit(nodeMenu.id); setNodeMenu(null); }}>编辑节点</button>
-        {([ ["child", "添加子节点"], ["sibling", "添加同级节点"], ["fold", "折叠 / 展开"], ["indent", "增加缩进"], ["outdent", "减少缩进"], ["delete", "删除节点"] ] as const).map(([command, label]) => <button role="menuitem" key={command} onClick={() => { action(command, [nodeMenu.id]); setNodeMenu(null); }}>{label}</button>)}
-        <button role="menuitem" onClick={() => { focus(nodeMenu.id); setNodeMenu(null); }}>进入此节点</button>
-        <button role="menuitem" onClick={() => setNodeMenu(null)}>取消</button>
-      </div>
-    </div>}
+    {!draggingNode && touchUI && mode === "map" && !editing && (selected.length > 0 || !!doc.views.focusId) && !props.readOnly ? <MobileNodeToolbar
+      selection={selected.length > 0} selectedId={selectedId} expanded={store.node(selectedId)?.expanded ?? true}
+      edit={() => edit(selectedId)} action={action} focusNode={() => focus(selectedId)}
+      exitFocus={doc.views.focusId ? () => focus(null) : undefined}
+      dismiss={() => { mind.current?.clearSelection(); updateView(document => { document.views.selectedIds = []; }); }} />
+      : !draggingNode && (selected.length > 0 || active || doc.views.focusId) && <NodeToolbar getEditor={ensureEditor} active={active} action={action} focusNode={() => focus(selectedId)} exitFocus={doc.views.focusId ? () => focus(null) : undefined} image={upload} undo={() => undo()} redo={() => undo(true)} boundary={() => store.boundary()} readOnly={props.readOnly || !selected.length && !active} onDismissKeyboard={touchUI && mode === "map" ? () => { setEditing(null); activeRef.current = null; setActive(null); } : undefined} />}
     {error && <div className="mindmap-save-error" role="alert">{error}<button onClick={() => { void flush(); }}>重试保存</button><button aria-label="关闭提示" onClick={() => setError("")}>×</button></div>}
   </div>;
 }

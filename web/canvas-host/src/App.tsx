@@ -96,6 +96,12 @@ export default function App() {
     readOnly: false
   });
   const [fontsReady, setFontsReady] = useState(false);
+  useEffect(() => {
+    const color = theme === "dark" ? "#1e1e1e" : "#ffffff";
+    document.documentElement.style.backgroundColor = color;
+    document.documentElement.style.colorScheme = theme;
+    document.body.style.backgroundColor = color;
+  }, [theme]);
   const saveTimeout = useRef<number | null>(null);
   const currentLoad = useRef(loadState);
   currentLoad.current = loadState;
@@ -197,7 +203,11 @@ export default function App() {
         window.clearTimeout(saveTimeout.current);
         saveTimeout.current = null;
       }
-      api.updateScene(normalizeScene(sceneJson));
+      const scene = coerceSceneJson(sceneJson ?? {});
+      if (scene.files && typeof scene.files === "object") {
+        api.addFiles(Object.values(scene.files) as Parameters<ExcalidrawImperativeAPI["addFiles"]>[0]);
+      }
+      api.updateScene(normalizeScene(scene));
       if (docId) {
         sendToNative(
           sendEnvelope("didChange", {
@@ -210,7 +220,7 @@ export default function App() {
         isApplyingScene.current = false;
       }, 150);
     },
-    [normalizeScene]
+    [normalizeScene, coerceSceneJson]
   );
 
   const lastToolbarState = useRef("");
@@ -258,6 +268,18 @@ export default function App() {
           reportToolbarState(api.getAppState());
           document.querySelector<HTMLElement>(".excalidraw")?.focus({ preventScroll: true });
         }
+        return;
+      }
+      if (message.type === "syncScene") {
+        const payload = message.payload as import("./types").SyncScenePayload;
+        if (payload.docId !== currentLoad.current.docId || payload.docId.toLowerCase().endsWith(".mindmap")) return;
+        if (revision.current !== savedRevision.current || saveFlight.current) return;
+        const api = excalidrawApi.current;
+        if (!api) return;
+        const scene = coerceSceneJson(payload.sceneJson);
+        const state = api.getAppState();
+        scene.appState = { ...((scene.appState as Record<string, unknown>) ?? {}), scrollX: state.scrollX, scrollY: state.scrollY, zoom: state.zoom, selectedElementIds: state.selectedElementIds };
+        applyScene(payload.docId, scene);
         return;
       }
       if (message.type === "loadScene") {

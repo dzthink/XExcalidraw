@@ -114,6 +114,15 @@ export class DocumentStore {
   private nodes = new Map<string, MapNode>();
   private indexedRevision = -1;
   constructor(document: MapDocument) { this.document = copy(document); }
+  replaceFromExternal(document: MapDocument) {
+    const views = copy(this.document.views);
+    this.document = copy(document);
+    this.document.views = views;
+    this.structureRevision++;
+    this.document.views.selectedIds = views.selectedIds.filter(id => this.node(id));
+    if (views.focusId && !this.node(views.focusId)) this.document.views.focusId = null;
+    this.past = []; this.future = []; this.cursor = null; this.boundary();
+  }
   node(id: string) {
     if (this.indexedRevision !== this.structureRevision) {
       this.nodes.clear();

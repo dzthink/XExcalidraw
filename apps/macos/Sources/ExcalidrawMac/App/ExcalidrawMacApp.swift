@@ -10,8 +10,8 @@ struct ExcalidrawMacApp: App {
     @NSApplicationDelegateAdaptor(SiyeApplicationDelegate.self) private var applicationDelegate
     @AppStorage("siye.appearance") private var appearance = AppearancePreference.system.rawValue
     var body: some Scene {
-        WindowGroup {
-            ContentView()
+        WindowGroup(for: DocumentWindowRequest.self) { $request in
+            ContentView(initialEntry: request?.entry)
                 .preferredColorScheme((AppearancePreference(rawValue: appearance) ?? .system).colorScheme)
         }
         .windowStyle(.automatic)
@@ -19,24 +19,58 @@ struct ExcalidrawMacApp: App {
     }
 }
 
+struct DocumentWindowRequest: Codable, Hashable {
+    let id: UUID
+    let entry: ExcalidrawFileEntry
+
+    init(entry: ExcalidrawFileEntry) {
+        id = UUID()
+        self.entry = entry
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+
 private final class CanvasSession: ObservableObject {
     let documentManager: DocumentManager
     let viewModel: WebCanvasViewModel
     private var subscriptions = Set<AnyCancellable>()
+#if DEBUG
+    private static let fixtureRoot = FileManager.default.temporaryDirectory.appendingPathComponent("UITests-" + UUID().uuidString)
+    private static let fixtureDefaultsName = "siye.uitests." + UUID().uuidString
+#endif
 
     init() {
         let manager: DocumentManager
 #if DEBUG
         if ProcessInfo.processInfo.environment["SIYE_UI_TEST_FIXTURE"] == "documents" {
-            let root = FileManager.default.temporaryDirectory.appendingPathComponent("UITests-" + UUID().uuidString)
-            let defaults = UserDefaults(suiteName: "siye.uitests." + UUID().uuidString)!
+            let root = Self.fixtureRoot
+            let defaults = UserDefaults(suiteName: Self.fixtureDefaultsName)!
             let store = FolderSourceStore(userDefaults: defaults, indexStore: ExcalidrawJSONFileIndexStore(fileURL: root.appendingPathComponent("index.json")))
             manager = DocumentManager(store: store, draftDirectory: root.appendingPathComponent("drafts"))
             do {
-                let folder = root.appendingPathComponent("Test Documents")
-                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                try JSONSerialization.data(withJSONObject: SiyeDocumentType.excalidraw.blankScene).write(to: folder.appendingPathComponent("Test Canvas.excalidraw"))
-                try store.addFolder(url: folder)
+                if store.sources.isEmpty {
+                    let folder = root.appendingPathComponent("Test Documents")
+                    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                    try JSONSerialization.data(withJSONObject: SiyeDocumentType.excalidraw.blankScene).write(to: folder.appendingPathComponent("Test Canvas.excalidraw"))
+                    var scene = SiyeDocumentType.mindmap.blankScene
+                    if ProcessInfo.processInfo.environment["SIYE_UI_TEST_NODE_DRAG"] == "1" {
+                        func node(_ id: String, _ text: String, children: [[String: Any]] = []) -> [String: Any] {
+                            ["id": id, "content": ["type": "doc", "content": [["type": "paragraph", "content": [["type": "text", "text": text]]]]], "note": "", "expanded": true, "children": children]
+                        }
+                        scene["nodeData"] = node("root", "中心主题", children: [node("moving", "移动节点", children: [node("leaf", "保留子节点")]), node("target", "目标父节点")])
+                        scene["settings"] = ["layout": "down", "palette": "gray", "noteDisplay": "all"]
+                        scene["views"] = ["mode": "map", "selectedIds": [], "focusId": NSNull(), "outlineScroll": 0, "map": ["scale": 0.8, "x": 0, "y": 0]] as [String: Any]
+                    }
+                    try JSONSerialization.data(withJSONObject: scene).write(to: folder.appendingPathComponent("Test Mind Map.mindmap"))
+                    try store.addFolder(url: folder)
+                }
             } catch { assertionFailure("UI test fixture failed: \(error)") }
         } else {
             manager = DocumentManager()
@@ -52,6 +86,13 @@ private final class CanvasSession: ObservableObject {
 }
 
 struct ContentView: View {
+    let initialEntry: ExcalidrawFileEntry?
+    @Environment(\.openWindow) private var openWindow
+
+    init(initialEntry: ExcalidrawFileEntry? = nil) {
+        self.initialEntry = initialEntry
+    }
+
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var session = CanvasSession()
     private var documentManager: DocumentManager { session.documentManager }
@@ -70,6 +111,7 @@ struct ContentView: View {
     
     /// 重建所有文件树根节点
     private func rebuildFileTrees() {
+        guard initialEntry == nil else { return }
         let sources = documentManager.sources
         let entries = documentManager.indexedEntries
         
@@ -213,44 +255,30 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $splitViewVisibility) {
-            sidebarView
-                .navigationSplitViewColumnWidth(min: 40, ideal: lastExpandedSidebarWidth, max: 520)
-                .background(
-                    GeometryReader { proxy in
-                        Color.clear.preference(key: SidebarWidthPreferenceKey.self, value: proxy.size.width)
-                    }
-                )
-        } detail: {
-            ZStack {
-                WebCanvasView(webView: viewModel.webView, accessibilityID: viewModel.isCanvasReady && viewModel.isStyleReady ? "canvas-ready" : "canvas-loading")
-                    .background(Color(nsColor: .windowBackgroundColor))
-                if !viewModel.isCanvasReady {
-                    VStack(spacing: 12) {
-                        ProgressView()
-                        Text("Loading canvas…")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(nsColor: .windowBackgroundColor))
+        Group {
+            if initialEntry != nil {
+                editorView
+            } else {
+                NavigationSplitView(columnVisibility: $splitViewVisibility) {
+                    sidebarView
+                        .navigationSplitViewColumnWidth(min: 40, ideal: lastExpandedSidebarWidth, max: 520)
+                        .background(
+                            GeometryReader { proxy in
+                                Color.clear.preference(key: SidebarWidthPreferenceKey.self, value: proxy.size.width)
+                            }
+                        )
+                } detail: {
+                    editorView
                 }
             }
-            .overlay(alignment: .bottomLeading) {
-                if viewModel.isDocumentLoading {
-                    HStack { ProgressView().controlSize(.small); Text("正在读取文件…") }
-                        .padding(10).background(.regularMaterial).cornerRadius(8).padding()
-                } else if let error = viewModel.documentLoadError {
-                    HStack { Text("文件打开失败：\(error)"); Button("关闭") { viewModel.documentLoadError = nil } }
-                        .padding(10).background(.regularMaterial).cornerRadius(8).padding()
-                }
-            }
-            .navigationTitle("")
         }
         .task {
             guard !didStartUp else { return }
             didStartUp = true
+            if let initialEntry {
+                selectedEntryId = initialEntry.id
+                viewModel.open(entry: initialEntry)
+            }
             viewModel.prewarm()
             viewModel.load()
         }
@@ -296,9 +324,12 @@ struct ContentView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .automatic) {
-                Button { openImportPicker() } label: { Label("导入", systemImage: "square.and.arrow.down") }
-                    .disabled(!documentManager.hasActiveSource)
+            if initialEntry == nil {
+                ToolbarItem(placement: .automatic) {
+                    Button { openImportPicker() } label: { Label("导入", systemImage: "square.and.arrow.down") }
+                        .accessibilityIdentifier("import-document-button")
+                        .disabled(!documentManager.hasActiveSource)
+                }
             }
             ToolbarItem(placement: .automatic) {
                 DocumentExportMenu(mindMap: viewModel.editorKind == "mindmap") { viewModel.requestExport(format: $0) }
@@ -307,19 +338,49 @@ struct ContentView: View {
             ToolbarItem(placement: .principal) {
                 DesktopEditorToolbar(viewModel: viewModel)
             }
-            ToolbarItem(placement: .navigation) {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        splitViewVisibility = splitViewVisibility == .detailOnly ? .all : .detailOnly
+            if initialEntry == nil {
+                ToolbarItem(placement: .navigation) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            splitViewVisibility = splitViewVisibility == .detailOnly ? .all : .detailOnly
+                        }
+                    } label: {
+                        Image(systemName: splitViewVisibility == .detailOnly ? "sidebar.left" : "sidebar.leading")
                     }
-                } label: {
-                    Image(systemName: splitViewVisibility == .detailOnly ? "sidebar.left" : "sidebar.leading")
+                    .accessibilityIdentifier("sidebar-toggle-button")
+                    .accessibilityLabel(splitViewVisibility == .detailOnly ? "Show navigation" : "Collapse navigation")
+                    .help(splitViewVisibility == .detailOnly ? "Show navigation" : "Collapse navigation")
                 }
-                .accessibilityIdentifier("sidebar-toggle-button")
-                .accessibilityLabel(splitViewVisibility == .detailOnly ? "Show navigation" : "Collapse navigation")
-                .help(splitViewVisibility == .detailOnly ? "Show navigation" : "Collapse navigation")
             }
         }
+    }
+
+    private var editorView: some View {
+        ZStack {
+            WebCanvasView(webView: viewModel.webView, accessibilityID: viewModel.isCanvasReady && viewModel.isStyleReady ? "canvas-ready" : "canvas-loading")
+                .background(Color(nsColor: .windowBackgroundColor))
+            if !viewModel.isCanvasReady {
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("Loading canvas…")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(nsColor: .windowBackgroundColor))
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if viewModel.isDocumentLoading {
+                HStack { ProgressView().controlSize(.small); Text("正在读取文件…") }
+                    .padding(10).background(.regularMaterial).cornerRadius(8).padding()
+            } else if let error = viewModel.documentLoadError {
+                HStack { Text("文件打开失败：\(error)"); Button("关闭") { viewModel.documentLoadError = nil } }
+                    .padding(10).background(.regularMaterial).cornerRadius(8).padding()
+            }
+        }
+        .navigationTitle(initialEntry.map { ExcalidrawFileName.displayName(from: $0.fileName) } ?? "")
     }
 
     private func openImportPicker() {
@@ -441,6 +502,15 @@ struct ContentView: View {
                             editingFileName: $editingFileName,
                             onSelectFile: { entry in
                                 viewModel.open(entry: entry)
+                            },
+                            onOpenInNewWindow: { entry in
+                                viewModel.flushEditing { success in
+                                    guard success else {
+                                        viewModel.documentLoadError = "当前文档未能保存，请稍后重试"
+                                        return
+                                    }
+                                    openWindow(value: DocumentWindowRequest(entry: entry))
+                                }
                             },
                             onRename: { entry in
                                 renameEntry(entry)
@@ -939,13 +1009,22 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
             DispatchQueue.main.async {
                 guard let self else { return }
                 switch result {
-                case .success:
+                case .success(let entry):
                     self.send(type: "saveResult", payload: ["requestId": requestId, "docId": docId, "success": true])
+                    for canvas in SiyeApplicationDelegate.canvases.allObjects where canvas !== self {
+                        canvas.synchronizeSavedScene(fileURL: entry.fileURL, sceneJson: raw)
+                    }
                 case .failure(let error):
                     self.send(type: "saveResult", payload: ["requestId": requestId, "docId": docId, "success": false, "error": error.localizedDescription])
                 }
             }
         }
+    }
+
+    func synchronizeSavedScene(fileURL: URL, sceneJson: Any) {
+        guard currentDocumentID == fileURL.path, !isDocumentLoading else { return }
+        // Apply peer saves without flushing this window's older copy back to disk.
+        deliver(type: "syncScene", payload: ["docId": fileURL.path, "sceneJson": sceneJson])
     }
 
     func flushEditing(completion: @escaping (Bool) -> Void) {
@@ -1076,6 +1155,7 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
 
     func setPreferredTheme(_ colorScheme: ColorScheme) {
         preferredTheme = colorScheme == .dark ? "dark" : "light"
+        webView.underPageBackgroundColor = colorScheme == .dark ? NSColor(calibratedWhite: 0.118, alpha: 1) : .white
         sendThemeUpdate()
     }
 

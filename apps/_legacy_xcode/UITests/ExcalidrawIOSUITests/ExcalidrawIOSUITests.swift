@@ -62,6 +62,89 @@ final class ExcalidrawIOSUITests: XCTestCase {
         start.press(forDuration: 0.05, thenDragTo: end)
     }
 
+    func testMobileNodeSelectionAndLongPressReparent() {
+        let app = makeApplication()
+        app.launchEnvironment["SIYE_UI_TEST_FIXTURE"] = "documents"
+        app.launchEnvironment["SIYE_UI_TEST_NODE_DRAG"] = "1"
+        app.launch()
+        let all = app.buttons["all-documents"]
+        XCTAssertTrue(all.waitForExistence(timeout: 15)); all.tap()
+        let file = app.staticTexts["Test Mind Map"].firstMatch
+        XCTAssertTrue(file.waitForExistence(timeout: 15)); file.tap()
+        let web = app.webViews["editor-ready"]
+        XCTAssertTrue(web.waitForExistence(timeout: 30))
+        let moving = web.staticTexts["移动节点"].firstMatch
+        let target = web.staticTexts["目标父节点"].firstMatch
+        XCTAssertTrue(moving.waitForExistence(timeout: 10)); XCTAssertTrue(target.exists)
+        moving.tap()
+        XCTAssertTrue(web.buttons["编辑节点"].waitForExistence(timeout: 5))
+        XCTAssertTrue(web.buttons["添加子节点"].exists)
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        attachScreenshot(app, name: "iPhone single tap node action bar")
+        web.buttons["更多节点操作"].tap()
+        XCTAssertFalse(web.buttons["增加缩进"].exists)
+        XCTAssertFalse(web.buttons["减少缩进"].exists)
+        for label in ["进入此节点", "删除节点"] {
+            XCTAssertTrue(web.buttons[label].exists)
+        }
+        web.buttons["进入此节点"].tap()
+        XCTAssertFalse(target.exists)
+        XCTAssertFalse(web.buttons["返回上级"].exists)
+        web.buttons["更多节点操作"].tap()
+        let exitFocus = web.buttons["返回完整导图"]
+        XCTAssertTrue(exitFocus.waitForExistence(timeout: 5))
+        XCTAssertFalse(web.buttons["进入此节点"].exists)
+        XCTAssertEqual(web.buttons.matching(identifier: "返回完整导图").count, 1)
+        for outside in [web.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.35)), moving.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))] {
+            outside.tap()
+            XCTAssertTrue(web.buttons["编辑节点"].exists)
+            XCTAssertTrue(web.buttons["添加子节点"].exists)
+            XCTAssertTrue(web.buttons["取消选中"].exists)
+            XCTAssertFalse(exitFocus.exists, "Outside tap closes only More")
+            XCTAssertFalse(app.keyboards.firstMatch.exists)
+            web.buttons["更多节点操作"].tap()
+            XCTAssertTrue(exitFocus.waitForExistence(timeout: 5))
+        }
+        attachScreenshot(app, name: "iPhone focus state in node actions")
+        exitFocus.tap()
+        XCTAssertTrue(target.waitForExistence(timeout: 5))
+        moving.tap()
+        web.buttons["更多节点操作"].tap()
+        XCTAssertTrue(web.buttons["进入此节点"].exists)
+        web.buttons["进入此节点"].tap()
+        web.buttons["取消选中"].tap()
+        XCTAssertTrue(exitFocus.waitForExistence(timeout: 5))
+        XCTAssertTrue(exitFocus.isHittable)
+        attachScreenshot(app, name: "iPhone toolbar exit without selection")
+        exitFocus.tap()
+        XCTAssertTrue(target.waitForExistence(timeout: 5))
+        XCTAssertFalse(exitFocus.exists)
+        moving.tap()
+        web.buttons["编辑节点"].tap()
+        let accessory = app.otherElements["mindmap-keyboard-accessory"].firstMatch
+        XCTAssertTrue(accessory.waitForExistence(timeout: 10))
+        accessory.buttons["收起键盘"].tap()
+        XCTAssertTrue(web.buttons["编辑节点"].waitForExistence(timeout: 5))
+        let start = moving.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let end = target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).withOffset(CGVector(dx: 0, dy: 12))
+        start.press(forDuration: 0.6, thenDragTo: end)
+        XCTAssertTrue(web.buttons["编辑节点"].waitForExistence(timeout: 5))
+        XCTAssertFalse(web.menuItems["添加子节点"].exists)
+        attachScreenshot(app, name: "iPhone long press moved subtree")
+        web.buttons["大纲"].tap()
+        XCTAssertTrue(web.buttons.matching(identifier: "折叠节点").firstMatch.waitForExistence(timeout: 5))
+        web.buttons.matching(identifier: "折叠节点").firstMatch.tap()
+        XCTAssertEqual(web.buttons.matching(identifier: "选择节点").count, 1, "Folding the new parent hides the entire moving subtree")
+        web.buttons["展开节点"].firstMatch.tap()
+        XCTAssertEqual(web.buttons.matching(identifier: "选择节点").count, 3)
+        app.buttons["返回"].tap()
+        XCTAssertTrue(file.waitForExistence(timeout: 15)); file.tap()
+        XCTAssertTrue(web.waitForExistence(timeout: 30))
+        web.buttons.matching(identifier: "折叠节点").firstMatch.tap()
+        XCTAssertEqual(web.buttons.matching(identifier: "选择节点").count, 1, "Reparenting survives close/reopen")
+        attachScreenshot(app, name: "iPhone persisted parent relationship")
+    }
+
     func testMindMapQuickDoubleReturnCreatesSibling() {
         for mode in ["大纲", "思维导图"] {
             let app = makeApplication()
@@ -525,15 +608,15 @@ final class ExcalidrawIOSUITests: XCTestCase {
         }
     }
 
-    func testMindMapBlocksAndLongPressMenu() {
-        verifyMindMapBlocks(includeNodeMenu: true)
+    func testMindMapBlocksAndSelectionToolbar() {
+        verifyMindMapBlocks(includeNodeActions: true, modes: ["思维导图"])
     }
 
     func testMindMapBlocksContinueWithoutHelper() {
-        verifyMindMapBlocks(includeNodeMenu: false, modes: ["大纲"])
+        verifyMindMapBlocks(includeNodeActions: false, modes: ["大纲"])
     }
 
-    private func verifyMindMapBlocks(includeNodeMenu: Bool, modes: [String] = ["大纲", "思维导图"]) {
+    private func verifyMindMapBlocks(includeNodeActions: Bool, modes: [String] = ["大纲", "思维导图"]) {
         for mode in modes {
             let app = makeApplication()
             app.launchEnvironment["SIYE_UI_TEST_FIXTURE"] = "documents"
@@ -583,27 +666,29 @@ final class ExcalidrawIOSUITests: XCTestCase {
             let codeText = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "after code"), object: field)
             XCTAssertEqual(XCTWaiter.wait(for: [codeText], timeout: 5), .completed)
             attachScreenshot(app, name: "\(mode) text after table and code")
-            if !includeNodeMenu { app.terminate(); continue }
+            if !includeNodeActions { app.terminate(); continue }
             accessory.buttons["收起键盘"].tap()
-            field.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.04)).press(forDuration: 0.8)
+            app.webViews.staticTexts["中心主题"].firstMatch.tap()
             let child = app.webViews.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "添加子节点")).firstMatch
             XCTAssertTrue(child.waitForExistence(timeout: 5), app.debugDescription)
-            XCTAssertTrue(app.webViews.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "删除节点")).firstMatch.isHittable)
-            attachScreenshot(app, name: "\(mode) long press node menu")
+            XCTAssertTrue(app.webViews.buttons["编辑节点"].firstMatch.isHittable)
+            attachScreenshot(app, name: "\(mode) selected node action bar")
             child.tap()
             let newField = app.webViews.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR identifier == %@", "节点正文", "节点正文")).firstMatch
             XCTAssertTrue(newField.waitForExistence(timeout: 5), app.debugDescription)
             if !accessory.exists { newField.tap() }
             XCTAssertTrue(accessory.waitForExistence(timeout: 5))
-            app.typeText("Long Press Child")
-            let childField = app.webViews.descendants(matching: .any).matching(NSPredicate(format: "(label == %@ OR identifier == %@) AND value CONTAINS %@", "节点正文", "节点正文", "Long Press Child")).firstMatch
+            app.typeText("Selected Child")
+            let childField = app.webViews.descendants(matching: .any).matching(NSPredicate(format: "(label == %@ OR identifier == %@) AND value CONTAINS %@", "节点正文", "节点正文", "Selected Child")).firstMatch
             XCTAssertTrue(childField.waitForExistence(timeout: 5), app.debugDescription)
             accessory.buttons["收起键盘"].tap()
-            childField.press(forDuration: 0.8)
+            let childNode = app.webViews.staticTexts["Selected Child"].firstMatch
+            childNode.tap()
+            app.webViews.buttons["更多节点操作"].tap()
             let delete = app.webViews.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "删除节点")).firstMatch
             XCTAssertTrue(delete.waitForExistence(timeout: 5))
             delete.tap()
-            let removed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: childField)
+            let removed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: childNode)
             XCTAssertEqual(XCTWaiter.wait(for: [removed], timeout: 5), .completed)
         }
     }

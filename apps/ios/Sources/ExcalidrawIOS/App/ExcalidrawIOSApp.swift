@@ -122,6 +122,16 @@ private final class CanvasSession: ObservableObject {
                             }
                             scene["nodeData"] = node("root", "中心主题", children: branches)
                         }
+                        if type == .mindmap {
+                        if ProcessInfo.processInfo.environment["SIYE_UI_TEST_NODE_DRAG"] == "1" {
+                            func node(_ id: String, _ text: String, children: [[String: Any]] = []) -> [String: Any] {
+                                ["id": id, "content": ["type": "doc", "content": [["type": "paragraph", "content": [["type": "text", "text": text]]]]], "note": "", "expanded": true, "children": children]
+                            }
+                            scene["nodeData"] = node("root", "中心主题", children: [node("moving", "移动节点", children: [node("leaf", "保留子节点")]), node("target", "目标父节点")])
+                            scene["settings"] = ["layout": "down", "palette": "gray", "noteDisplay": "all"]
+                            scene["views"] = ["mode": "map", "selectedIds": [], "focusId": NSNull(), "outlineScroll": 0, "map": ["scale": 0.8, "x": 0, "y": 0]] as [String: Any]
+                        }
+                        }
                         let data = try JSONSerialization.data(withJSONObject: scene)
                         try data.write(to: folder.appendingPathComponent(name + type.fileExtension), options: .atomic)
                     }
@@ -2084,8 +2094,7 @@ private final class NodeKeyboardAccessory: UIView {
     }
 }
 
-private final class CanvasWebView: WKWebView, UIDocumentPickerDelegate, UIGestureRecognizerDelegate {
-    var allowsNodeLongPress = false
+private final class CanvasWebView: WKWebView, UIDocumentPickerDelegate {
     private lazy var nodeAccessory: NodeKeyboardAccessory = {
         let view = NodeKeyboardAccessory()
         view.onAction = { [weak self] action in
@@ -2113,34 +2122,10 @@ private final class CanvasWebView: WKWebView, UIDocumentPickerDelegate, UIGestur
 
     override init(frame: CGRect, configuration: WKWebViewConfiguration) {
         super.init(frame: frame, configuration: configuration)
-        let nodePress = UILongPressGestureRecognizer(target: self, action: #selector(showNodeMenu(_:)))
-        nodePress.name = "siye-node-long-press"
-        nodePress.minimumPressDuration = 0.35
-        nodePress.allowableMovement = 10
-        nodePress.cancelsTouchesInView = false
-        nodePress.delegate = self
-        addGestureRecognizer(nodePress)
         NotificationCenter.default.addObserver(self, selector: #selector(updateAccessoryFrame), name: UIResponder.keyboardDidChangeFrameNotification, object: nil)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        guard gestureRecognizer.name == "siye-node-long-press" else { return super.gestureRecognizerShouldBegin(gestureRecognizer) }
-        return usesNodeToolbar && allowsNodeLongPress && gestureRecognizer.numberOfTouches == 1
-    }
-
-    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        gestureRecognizer.name == "siye-node-long-press" || otherGestureRecognizer.name == "siye-node-long-press"
-    }
-
-    @objc private func showNodeMenu(_ gesture: UILongPressGestureRecognizer) {
-        guard gesture.state == .began, bounds.width > 0 else { return }
-        let point = gesture.location(in: self)
-        let x = point.x / bounds.width
-        let y = (point.y - scrollView.adjustedContentInset.top) / bounds.width
-        evaluateJavaScript("window.dispatchEvent(new CustomEvent('siye-node-long-press', {detail: {x: \(x) * window.innerWidth, y: \(y) * window.innerWidth}}));", completionHandler: nil)
-    }
 
     @objc private func updateAccessoryFrame() {
         guard nodeAccessory.window != nil, bounds.width > 0 else { return }
@@ -2287,12 +2272,7 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
     }
 
     private func handleMessage(type: String, payload: [String: Any]) {
-        if type == "nodeInteractionState" {
-            guard payload["docId"] as? String == currentDocumentID else { return }
-            (webView as? CanvasWebView)?.allowsNodeLongPress = payload["viewMode"] as? String == "map"
-                && (payload["editingId"] == nil || payload["editingId"] is NSNull)
-                && payload["readOnly"] as? Bool == false
-        } else if type == "saveScene" {
+        if type == "saveScene" {
             handleSave(payload: payload)
         } else if type == "openLink" {
             if let value = payload["url"] as? String, let url = URL(string: value), ["https", "http", "mailto"].contains(url.scheme?.lowercased() ?? "") {
@@ -2586,7 +2566,6 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
 
     private func deliver(type: String, payload: [String: Any]) {
         if (type == "loadScene" || type == "updateDocId"), let docId = payload["docId"] as? String {
-            if type == "loadScene" { (webView as? CanvasWebView)?.allowsNodeLongPress = false }
             currentDocumentID = docId
             (webView as? CanvasWebView)?.usesNodeToolbar = SiyeDocumentType(fileName: docId) == .mindmap || (payload["sceneJson"] as? [String: Any])?["format"] as? String == "siye-mindmap"
             let context = documentManager.attachmentContext(docId: docId)

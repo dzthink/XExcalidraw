@@ -351,3 +351,81 @@ test("interchange exports escape XML, preserve tree and package valid XMind ZIP"
   assert.equal(sheets[0].rootTopic.children.attached[0].title, "子主题");
   assert.equal(view.getUint32(bytes.length - 22, true), 0x06054b50);
 });
+
+test("peer save replaces content while preserving local view and rebuilding node lookup", () => {
+  const original = newDocument();
+  const child = newNode("Before"); original.nodeData.children.push(child);
+  const store = new DocumentStore(original);
+  store.document.views.outlineScroll = 180;
+  store.document.views.mode = "outline";
+  store.document.views.selectedIds = [child.id];
+  store.document.views.focusId = child.id;
+  const oldNode = store.node(child.id);
+  const remote = structuredClone(original);
+  remote.nodeData.children[0].content = plainContent("After");
+  remote.views.outlineScroll = 0; remote.views.mode = "map";
+  store.replaceFromExternal(remote);
+  assert.notEqual(store.node(child.id), oldNode);
+  assert.deepEqual(store.node(child.id)?.content, plainContent("After"));
+  assert.equal(store.document.views.outlineScroll, 180);
+  assert.equal(store.document.views.mode, "outline");
+  assert.deepEqual(store.document.views.selectedIds, [child.id]);
+  assert.equal(store.document.views.focusId, child.id);
+  assert.equal(store.revision, 0);
+});
+
+test("peer deletion clears invalid focus, selection and stale undo history", () => {
+  const original = newDocument(); const child = newNode("Child");
+  original.nodeData.children.push(child);
+  const store = new DocumentStore(original);
+  store.change(doc => { doc.nodeData.content = plainContent("Local change"); });
+  store.document.views.selectedIds = [child.id]; store.document.views.focusId = child.id;
+  const remote = structuredClone(original); remote.nodeData.children = [];
+  store.replaceFromExternal(remote);
+  assert.equal(store.node(child.id), null);
+  assert.deepEqual(store.document.views.selectedIds, []);
+  assert.equal(store.document.views.focusId, null);
+  assert.equal(store.undo(), false);
+  assert.equal(store.redo(), false);
+  assert.deepEqual(store.document.nodeData.content, remote.nodeData.content);
+});
+
+test("drag infers the nearest parent in empty space and excludes the whole moving subtree", async () => {
+  const { nearestParent } = await import("../src/mindmap/nodeDrag");
+  const { doc, a, b, c } = fixture();
+  const candidates = [
+    { id: doc.nodeData.id, left: 0, top: 0, width: 100, height: 40 },
+    { id: a.id, left: 200, top: 0, width: 100, height: 40 },
+    { id: c.id, left: 400, top: 0, width: 100, height: 40 },
+    { id: b.id, left: 400, top: 100, width: 100, height: 40 }
+  ];
+  assert.equal(nearestParent(doc.nodeData, a.id, 440, 50, candidates), b.id);
+  assert.equal(nearestParent(doc.nodeData, a.id, 110, 20, candidates), doc.nodeData.id);
+  assert.equal(nearestParent(doc.nodeData, doc.nodeData.id, 400, 100, candidates), null);
+  assert.equal(nearestParent(doc.nodeData, a.id, 400, 100, []), null);
+});
+test("drag distance uses rich-text bounds consistently across zoom and downward layout", async () => {
+  const { nearestParent } = await import("../src/mindmap/nodeDrag");
+  const { doc, a, b, c } = fixture();
+  const candidates = [
+    { id: a.id, left: 0, top: 100, width: 400, height: 80 },
+    { id: b.id, left: 300, top: 220, width: 80, height: 40 }
+  ];
+  for (const scale of [0.25, 1, 3]) {
+    const scaled = candidates.map(rect => ({ id: rect.id, left: rect.left * scale, top: rect.top * scale, width: rect.width * scale, height: rect.height * scale }));
+    assert.equal(nearestParent(doc.nodeData, c.id, 390 * scale, 185 * scale, scaled), a.id);
+    assert.equal(nearestParent(doc.nodeData, c.id, 390 * scale, 215 * scale, scaled), b.id);
+  }
+});
+test("drag reparenting keeps descendants and expands destination in a single undo step", () => {
+  const { doc, a, b, c } = fixture(); b.expanded = false;
+  const store = new DocumentStore(doc);
+  store.change(document => { moveNodes(document.nodeData, [a.id], b.id, "inside"); });
+  assert.equal(store.node(b.id)?.expanded, true);
+  assert.equal(store.node(b.id)?.children[0].children[0].id, c.id);
+  assert.equal(store.undo(), true);
+  assert.deepEqual(store.document.nodeData.children.map(node => node.id), [a.id, b.id]);
+  assert.equal(store.node(b.id)?.expanded, false);
+  assert.equal(store.redo(), true);
+  assert.equal(store.node(b.id)?.children[0].id, a.id);
+});

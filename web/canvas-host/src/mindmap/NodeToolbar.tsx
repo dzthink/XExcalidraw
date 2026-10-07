@@ -12,9 +12,9 @@ import type { StructureAction } from "./document";
 import ToolbarIcon, { type ToolbarIconName } from "./ToolbarIcon";
 
 type Props = { getEditor: (wholeNode?: boolean) => Promise<EditorHandle | null>; active: EditorHandle | null;
-  action: (action: StructureAction) => void; focusNode: () => void;
+  action: (action: StructureAction) => void; focusNode: () => void; exitFocus?: () => void;
   image: (file: File, view: EditorView) => void; undo: () => void; redo: () => void;
-  boundary: () => void; readOnly: boolean;
+  boundary: () => void; readOnly: boolean; onDismissKeyboard?: () => void;
 };
 export default function NodeToolbar(props: Props) {
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
@@ -70,7 +70,7 @@ export default function NodeToolbar(props: Props) {
         "表格": () => toggle("table"), "代码": () => toggle("code"),
         "链接": () => { void openLink(); },
         "撤销": props.undo, "重做": props.redo, "节点操作": () => toggle("more"),
-        "收起键盘": () => setPanel(null),
+        "收起键盘": () => { setPanel(null); props.onDismissKeyboard?.(); },
         "恢复编辑": () => { if (props.active?.view.dom.isConnected) props.active.view.focus(); },
       };
       handlers[(event as CustomEvent<string>).detail]?.();
@@ -135,11 +135,11 @@ export default function NodeToolbar(props: Props) {
       {button("撤销", props.undo, "undo")}{button("重做", props.redo, "redo")}
       {!isIOS && button("节点操作", () => toggle("more"), "more")}
     </>}
-    {props.readOnly && button("进入此节点", props.focusNode)}
+    {props.readOnly && button(props.exitFocus ? "返回完整导图" : "进入此节点", props.exitFocus ?? props.focusNode, props.exitFocus ? "undo" : "focus")}
     </div>
     {!props.readOnly && <button className="mindmap-keyboard-dismiss" type="button" aria-label="收起键盘" title="收起键盘" onClick={() => {
       if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-      setPanel(null);
+      setPanel(null); props.onDismissKeyboard?.();
     }}>⌄</button>}
     {panel && !props.readOnly && <div className={`mindmap-toolbar-panel mindmap-panel-${panel}`} role="group" aria-label={panel === "more" ? "节点操作" : `${panelNames[panel]}操作`}>
       <div className="mindmap-panel-content">
@@ -210,7 +210,7 @@ export default function NodeToolbar(props: Props) {
         </div>
         <div className="mindmap-panel-footer">
           {iconButton("折叠或展开", "fold", () => { props.action("fold"); setPanel(null); })}
-          {iconButton("进入此节点", "focus", () => { props.focusNode(); setPanel(null); })}
+          {iconButton(props.exitFocus ? "返回完整导图" : "进入此节点", props.exitFocus ? "undo" : "focus", () => { (props.exitFocus ?? props.focusNode)(); setPanel(null); })}
           {iconButton("删除节点", "trash", () => { props.action("delete"); setPanel(null); }, { destructive: true })}
         </div>
       </>}

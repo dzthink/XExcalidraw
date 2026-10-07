@@ -9,6 +9,7 @@ struct FileTreeNodeView: View {
     @Binding var editingEntryId: UUID?
     @Binding var editingFileName: String
     let onSelectFile: (ExcalidrawFileEntry) -> Void
+    let onOpenInNewWindow: (ExcalidrawFileEntry) -> Void
     let onRename: (ExcalidrawFileEntry) -> Void
     let onCommitRename: (ExcalidrawFileEntry, String) -> Void
     let onCancelRename: () -> Void
@@ -37,6 +38,7 @@ struct FileTreeNodeView: View {
                     editingEntryId: $editingEntryId,
                     editingFileName: $editingFileName,
                     onSelectFile: onSelectFile,
+                    onOpenInNewWindow: onOpenInNewWindow,
                     onRename: onRename,
                     onCommitRename: onCommitRename,
                     onCancelRename: onCancelRename,
@@ -56,6 +58,7 @@ struct FileTreeNodeView: View {
                         selectedEntryId = entry.id
                         onSelectFile(entry)
                     },
+                    onOpenInNewWindow: { onOpenInNewWindow(entry) },
                     onRename: { onRename(entry) },
                     onCommitRename: { onCommitRename(entry, editingFileName) },
                     onCancelRename: onCancelRename,
@@ -75,6 +78,7 @@ struct FileTreeContentView: View {
     @Binding var editingEntryId: UUID?
     @Binding var editingFileName: String
     let onSelectFile: (ExcalidrawFileEntry) -> Void
+    let onOpenInNewWindow: (ExcalidrawFileEntry) -> Void
     let onRename: (ExcalidrawFileEntry) -> Void
     let onCommitRename: (ExcalidrawFileEntry, String) -> Void
     let onCancelRename: () -> Void
@@ -94,6 +98,7 @@ struct FileTreeContentView: View {
                         editingEntryId: $editingEntryId,
                         editingFileName: $editingFileName,
                         onSelectFile: onSelectFile,
+                        onOpenInNewWindow: onOpenInNewWindow,
                         onRename: onRename,
                         onCommitRename: onCommitRename,
                         onCancelRename: onCancelRename,
@@ -220,6 +225,7 @@ struct FileRowView: View {
     let isEditing: Bool
     @Binding var editingFileName: String
     let onSelect: () -> Void
+    let onOpenInNewWindow: () -> Void
     let onRename: () -> Void
     let onCommitRename: () -> Void
     let onCancelRename: () -> Void
@@ -278,7 +284,16 @@ struct FileRowView: View {
                 .buttonStyle(.plain)
             }
         }
+        .accessibilityValue(isSelected ? "Selected" : "")
+        .accessibilityIdentifier("file-row-" + entry.fileName)
         .contextMenu {
+            Button(action: onOpenInNewWindow) {
+                Label("在新窗口打开", systemImage: "macwindow.badge.plus")
+            }
+            .accessibilityIdentifier("open-in-new-window")
+
+            Divider()
+
             Button {
                 onRename()
             } label: {
@@ -362,6 +377,7 @@ private struct SidebarTreeRowStyle: ViewModifier {
                 editingEntryId: .constant(nil),
                 editingFileName: .constant(""),
                 onSelectFile: { _ in },
+                onOpenInNewWindow: { _ in },
                 onRename: { _ in },
                 onCommitRename: { _, _ in },
                 onCancelRename: {},

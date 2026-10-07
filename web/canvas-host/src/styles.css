@@ -1,3 +1,13 @@
+/* Keep WebKit rubber-band scrolling inside the editor's own scroll area. */
+html[data-native-desktop="true"],
+html[data-native-desktop="true"] body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+html[data-native-desktop="true"] .mindmap-outline-document {
+  overscroll-behavior: none;
+}
+
 html,
 body,
 #root {
@@ -62,11 +72,6 @@ body,
     padding-top: 4px;
   }
 }
-
-.mindmap-node-menu-backdrop { position: fixed; inset: 0; z-index: 1000; }
-.mindmap-node-menu { position: fixed; width: 184px; max-height: calc(100dvh - 16px); overflow-y: auto; padding: 4px; background: var(--bg, #fff); color: var(--text, #222); border: 1px solid #8886; border-radius: 12px; box-shadow: 0 8px 28px #0003; }
-.mindmap-node-menu button { display: block; width: 100%; min-height: 36px; border: 0; background: transparent; color: inherit; text-align: left; padding: 8px 12px; }
-.mindmap-node-menu button:active { background: #8883; }
 
 /* macOS uses the native window toolbar for drawing tools. */
 html[data-native-desktop="true"] .excalidraw .shapes-section,

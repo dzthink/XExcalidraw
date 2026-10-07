@@ -27,6 +27,10 @@ interface BridgeEnvelope {
 }
 ```
 
+### syncScene (macOS)
+
+After a successful save, native sends the committed scene to other windows showing the same file. Payload: `{ docId: string, sceneJson: object | string }`. Receivers update content without saving their old copy first or changing their local viewport. A receiver with unsaved edits or an in-flight save ignores the update; concurrent edits are not merged. Mind maps clear stale undo history when accepting a peer scene.
+
 ### setAppState
 ```json
 {
@@ -139,8 +143,8 @@ For a pasted mind-map image, Web sends `saveAttachment` with `requestId`, the ac
 
 For iOS mind-map input, `CanvasWebView.inputAccessoryView` supplies the native capsule toolbar. UIKit owns its position across input methods; no fixed keyboard height is used. A document-start script sets `window.siyeNativeKeyboardAccessory`. Accessory visibility and its actual top edge (converted to CSS coordinates after the WebView safe-area inset) are updated through `siye-native-keyboard`. The page uses these coordinates only to position contextual panels and keep the editing node visible.
 
-`siye-node-toolbar-action` carries a toolbar action label to the current React handlers. iOS always suppresses the old web action strip, including during keyboard transitions. The native image button presents a document picker and emits `siye-node-toolbar-image` with transient `base64`, `name`, and `mime`; the normal `saveAttachment` acknowledgement flow persists the image. Desktop and ordinary browser hosts retain the web toolbar.
+`siye-node-toolbar-action` carries a toolbar action label to the current React handlers. iOS suppresses the web formatting strip, including during keyboard transitions. The selection action bar remains visible when no node is being edited. The native image button presents a document picker and emits `siye-node-toolbar-image` with transient `base64`, `name`, and `mime`; the normal `saveAttachment` acknowledgement flow persists the image. Desktop and ordinary browser hosts retain the web toolbar.
 
-### nodeInteractionState
+### Mobile node interaction
 
-Web sends `{docId, viewMode: "outline" | "map", editingId: string | null, readOnly: boolean}` when mind-map interaction state changes. iOS rejects messages for other documents and enables its node-menu long-press recognizer only in editable map mode with `editingId: null`. Outline uses its explicit menu buttons. Active map editors retain native text-selection gestures independently of keyboard visibility. Web touch handling also checks the target node against `editingId`; a different, non-editing map node may still open its menu. Loading a document resets native recognition until the new state arrives.
+In map view, tapping a non-editing node shows a web floating node-action bar styled like the native keyboard accessory. Editing switches to the native formatting accessory; dismissing the keyboard returns to node selection actions. Long press (350 ms) starts node movement and never opens a context menu. Pointer handling owns this gesture; iOS no longer installs a competing node-menu recognizer. Outline retains its explicit menu buttons and active text editors retain text-selection gestures.
