@@ -123,6 +123,18 @@ private final class CanvasSession: ObservableObject {
                             scene["nodeData"] = node("root", "中心主题", children: branches)
                         }
                         if type == .mindmap {
+                        if let layout = ProcessInfo.processInfo.environment["SIYE_UI_TEST_LAYOUT_DRAG"], ["right", "left", "down", "side"].contains(layout) {
+                            func node(_ id: String, _ text: String, children: [[String: Any]] = [], side: String? = nil) -> [String: Any] {
+                                var value: [String: Any] = ["id": id, "content": ["type": "doc", "content": [["type": "paragraph", "content": [["type": "text", "text": text]]]]], "note": "", "expanded": true, "children": children]
+                                if let side { value["side"] = side }
+                                return value
+                            }
+                            var branches = [node("b1", "B1", children: [node("c", "C")], side: "right"), node("b2", "B2", side: "right"), node("b3", "B3", children: [node("leaf", "保留子节点")], side: "right")]
+                            if layout == "side" { branches.insert(node("left", "左侧", side: "left"), at: 1) }
+                            scene["nodeData"] = node("root", "A", children: branches)
+                            scene["settings"] = ["layout": layout, "palette": "gray", "noteDisplay": "all"]
+                            scene["views"] = ["mode": "map", "selectedIds": [], "focusId": NSNull(), "outlineScroll": 0, "map": ["scale": 0.65, "x": 0, "y": 0]] as [String: Any]
+                        }
                         if ProcessInfo.processInfo.environment["SIYE_UI_TEST_NODE_DRAG"] == "1" {
                             func node(_ id: String, _ text: String, children: [[String: Any]] = []) -> [String: Any] {
                                 ["id": id, "content": ["type": "doc", "content": [["type": "paragraph", "content": [["type": "text", "text": text]]]]], "note": "", "expanded": true, "children": children]

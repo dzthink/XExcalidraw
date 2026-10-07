@@ -54,7 +54,7 @@ export default function MindMapEditor(props: Props) {
   interaction.current = { mode, editing, readOnly: props.readOnly };
   const root = doc && (doc.views.focusId ? findNode(doc.nodeData, doc.views.focusId) : null) || doc?.nodeData;
   const selected = doc?.views.selectedIds ?? [], selectedId = selected[0] ?? active?.id ?? doc?.views.focusId ?? undefined;
-  const callbacks = useRef({} as { focus: (id: string | null) => void; select: (id: string, multiple?: boolean) => void; edit: (id: string, atEnd?: boolean) => void; action: (action: StructureAction, ids?: string[]) => void; move: (ids: string[], target: string, placement: "before" | "after" | "inside") => void; change: (fn: (doc: MapDocument) => void, group?: string | null) => void; view: (fn: (doc: MapDocument) => void) => void });
+  const callbacks = useRef({} as { focus: (id: string | null) => void; select: (id: string, multiple?: boolean) => void; edit: (id: string, atEnd?: boolean) => void; action: (action: StructureAction, ids?: string[]) => void; move: (ids: string[], target: string, placement: "before" | "after" | "inside", sides?: Map<string, "left" | "right">) => void; change: (fn: (doc: MapDocument) => void, group?: string | null) => void; view: (fn: (doc: MapDocument) => void) => void });
   const request = (type: string, payload: Record<string, unknown>): Promise<Record<string, unknown>> => new Promise((resolve, reject) => {
     const requestId = crypto.randomUUID();
     const timeout = window.setTimeout(() => { pending.current.delete(requestId); reject(new Error("保存未收到应用确认，请重试")); }, 10000);
@@ -99,7 +99,14 @@ export default function MindMapEditor(props: Props) {
     flushSync(() => action("sibling", [id]));
     activeRef.current?.view.focus();
   };
-  const move = (ids: string[], target: string, placement: "before" | "after" | "inside") => { setEditing(null); activeRef.current = null; setActive(null); change(document => { if (moveNodes(document.nodeData, ids, target, placement)) document.views.selectedIds = ids; }); };
+  const move = (ids: string[], target: string, placement: "before" | "after" | "inside", sides?: Map<string, "left" | "right">) => {
+    setEditing(null); activeRef.current = null; setActive(null);
+    change(document => {
+      if (!moveNodes(document.nodeData, ids, target, placement)) return;
+      sides?.forEach((side, id) => { const node = findNode(document.nodeData, id); if (node) node.side = side; });
+      document.views.selectedIds = ids;
+    });
+  };
   callbacks.current = { focus: id => focus(id), select, edit, action, move, change, view: updateView };
   const onActive = (handle: EditorHandle) => {
     if (!store) return;
@@ -260,7 +267,7 @@ export default function MindMapEditor(props: Props) {
     renderedNodes.current.set(node.id, { content: node.content, docId: props.docId, expanded: node.expanded, children: node.children.length, html });
     return html;
   };
-  const adapter = (node: MapNode, depth = 0): NodeObj => ({ id: node.id, topic: contentText(node.content) || " ", expanded: node.expanded, branchColor: props.theme === "dark" ? "#555b65" : "#c6cad0", dangerouslySetInnerHTML: nodeHTML(node), metadata: { depth }, children: node.children.map(child => adapter(child, depth + 1)) });
+  const adapter = (node: MapNode, depth = 0): NodeObj => ({ id: node.id, topic: contentText(node.content) || " ", expanded: node.expanded, branchColor: props.theme === "dark" ? "#555b65" : "#c6cad0", dangerouslySetInnerHTML: nodeHTML(node), metadata: { depth }, ...(depth === 1 && doc?.settings.layout === "side" && node.side ? { direction: node.side === "left" ? MindElixir.LEFT : MindElixir.RIGHT } : {}), children: node.children.map(child => adapter(child, depth + 1)) });
   const mapData = (): MindElixirData => ({ nodeData: adapter(root!), direction: doc!.settings.layout === "down" ? MindElixir.DOWN : doc!.settings.layout === "left" ? MindElixir.LEFT : doc!.settings.layout === "right" ? MindElixir.RIGHT : MindElixir.SIDE });
   useEffect(() => {
     window.siyeExport = async format => {
@@ -363,7 +370,7 @@ export default function MindMapEditor(props: Props) {
     const removeNodeDrag = installNodeDrag({
       host: host.current, overlayHost: editorHost.current!,
       root: () => store.document.views.focusId ? findNode(store.document.nodeData, store.document.views.focusId) ?? store.document.nodeData : store.document.nodeData,
-      topics: () => topicElements.current, scale: () => instance.scaleVal,
+      topics: () => topicElements.current, scale: () => instance.scaleVal, layout: () => store.document.settings.layout,
       canStart: id => allowsNodeLongPress(interaction.current.mode, interaction.current.editing, id, interaction.current.readOnly) && !instance.spacePressed,
       pan: (dx, dy) => { instance.move(dx, dy); },
       press: id => {
@@ -376,7 +383,18 @@ export default function MindMapEditor(props: Props) {
         const menu = instance.container.querySelector<HTMLElement>(".context-menu"); if (menu) menu.hidden = true;
         callbacks.current.select(id);
       },
-      move: (id, parentId) => callbacks.current.move([id], parentId, "inside"),
+      move: (id, drop) => {
+        const sides = new Map<string, "left" | "right">();
+        if (store.document.settings.layout === "side") {
+          const visibleRoot = store.document.views.focusId ? store.node(store.document.views.focusId) : store.document.nodeData;
+          for (const child of visibleRoot?.children ?? []) {
+            const direction = topicElements.current.get(child.id)?.nodeObj.direction;
+            if (direction === MindElixir.LEFT || direction === MindElixir.RIGHT) sides.set(child.id, direction === MindElixir.LEFT ? "left" : "right");
+          }
+          if (drop.side) sides.set(id, drop.side);
+        }
+        callbacks.current.move([id], drop.targetId, drop.placement, sides);
+      },
       end: () => { setDraggingNode(false); }
     });
     props.onReady(instance); update();

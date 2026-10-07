@@ -390,32 +390,169 @@ test("peer deletion clears invalid focus, selection and stale undo history", () 
   assert.deepEqual(store.document.nodeData.content, remote.nodeData.content);
 });
 
-test("drag infers the nearest parent in empty space and excludes the whole moving subtree", async () => {
-  const { nearestParent } = await import("../src/mindmap/nodeDrag");
-  const { doc, a, b, c } = fixture();
+test("drag uses local alignment bands and gaps in every layout at every zoom", async () => {
+  const { inferParent } = await import("../src/mindmap/nodeDrag");
+  const doc = newDocument(), b = newNode("B"), c = newNode("C"), moving = newNode("D");
+  doc.nodeData.children.push(b, moving); b.children.push(c);
+  const base = [
+    { id: doc.nodeData.id, left: 0, top: 0, width: 120, height: 40 },
+    { id: b.id, left: 200, top: 0, width: 170, height: 40 },
+    { id: c.id, left: 450, top: 0, width: 100, height: 40 }
+  ];
+  for (const layout of ["right", "left", "down", "side"] as const) {
+    for (const scale of [0.25, 1, 3]) {
+      const transform = (rect: typeof base[number]) => {
+        const value = layout === "left" ? { ...rect, left: -rect.left - rect.width }
+          : layout === "down" ? { ...rect, left: rect.top, top: rect.left, width: rect.height, height: rect.width } : rect;
+        return { id: value.id, left: value.left * scale, top: value.top * scale, width: value.width * scale, height: value.height * scale };
+      };
+      const candidates = base.map(transform);
+      for (const [column, expected] of [[200, doc.nodeData.id], [210, doc.nodeData.id], [320, b.id], [450, b.id], [500, c.id]] as const) {
+        // Different node widths must not affect the inferred level.
+        for (const width of [60, 300]) {
+          const rect = transform({ id: moving.id, left: column, top: 65, width, height: 40 });
+          assert.equal(inferParent(doc.nodeData, moving.id, rect, candidates, layout, scale), expected, `${layout} scale=${scale} column=${column} width=${width}`);
+        }
+      }
+    }
+  }
+});
+test("drag chooses the branch by its visible subtree and stabilizes ambiguous boundaries", async () => {
+  const { inferParent } = await import("../src/mindmap/nodeDrag");
+  const doc = newDocument(), b = newNode("B"), c = newNode("C"), e = newNode("E"), f = newNode("F"), moving = newNode("D");
+  doc.nodeData.children.push(b, e, moving); b.children.push(c); e.children.push(f);
+  const candidates = [
+    { id: doc.nodeData.id, left: 0, top: 140, width: 100, height: 40 },
+    { id: b.id, left: 200, top: 0, width: 100, height: 40 },
+    { id: c.id, left: 400, top: 120, width: 100, height: 40 },
+    { id: e.id, left: 240, top: 300, width: 100, height: 40 },
+    { id: f.id, left: 440, top: 300, width: 100, height: 40 }
+  ];
+  const drop = (left: number, top: number, previous: string | null = null) => inferParent(doc.nodeData, moving.id,
+    { id: moving.id, left, top, width: 80, height: 40 }, candidates, "right", 1, previous);
+  assert.equal(drop(320, 130), b.id); // B is farther away than C, but owns this insertion lane.
+  assert.equal(drop(240, 330), doc.nodeData.id); // E has its own column, not B's column.
+  assert.equal(drop(350, 330), e.id);
+  assert.equal(drop(300, 210, e.id), e.id); // Equal branch scores retain the preview.
+  assert.equal(drop(220, 0, doc.nodeData.id), doc.nodeData.id);
+  assert.equal(drop(220, 0, b.id), b.id);
+  assert.equal(drop(226, 0, doc.nodeData.id), b.id);
+  assert.equal(drop(211, 0, b.id), doc.nodeData.id);
+  assert.equal(drop(900, 0), null);
+  assert.equal(drop(300, 800), null);
+  assert.equal(drop(-100, 0), null);
+});
+test("drag mirrors each half of a two-sided layout and ignores the moving subtree", async () => {
+  const { inferParent } = await import("../src/mindmap/nodeDrag");
+  const doc = newDocument(), l = newNode("L"), r = newNode("R"), moving = newNode("D"), child = newNode("moving child");
+  doc.nodeData.children.push(l, r, moving); moving.children.push(child);
+  const candidates = [
+    { id: doc.nodeData.id, left: -50, top: 0, width: 100, height: 40 },
+    { id: l.id, left: -300, top: 0, width: 100, height: 40 },
+    { id: r.id, left: 200, top: 0, width: 100, height: 40 },
+    { id: moving.id, left: 350, top: 0, width: 100, height: 40 },
+    { id: child.id, left: 400, top: 0, width: 100, height: 40 }
+  ];
+  const drop = (left: number) => inferParent(doc.nodeData, moving.id, { id: moving.id, left, top: 50, width: 100, height: 40 }, candidates, "side");
+  assert.equal(drop(200), doc.nodeData.id);
+  assert.equal(drop(-300), doc.nodeData.id);
+  assert.equal(drop(350), r.id);
+  assert.equal(drop(-450), l.id);
+  assert.equal(inferParent(doc.nodeData, doc.nodeData.id, candidates[0], candidates, "side"), null);
+  assert.equal(inferParent(doc.nodeData, moving.id, candidates[0], [], "side"), null);
+});
+test("drag can attach to folded leaves without considering hidden descendants", async () => {
+  const { inferParent } = await import("../src/mindmap/nodeDrag");
+  const doc = newDocument(), b = newNode("folded"), c = newNode("hidden"), moving = newNode("D");
+  doc.nodeData.children.push(b, moving); b.children.push(c); b.expanded = false;
   const candidates = [
     { id: doc.nodeData.id, left: 0, top: 0, width: 100, height: 40 },
-    { id: a.id, left: 200, top: 0, width: 100, height: 40 },
-    { id: c.id, left: 400, top: 0, width: 100, height: 40 },
-    { id: b.id, left: 400, top: 100, width: 100, height: 40 }
+    { id: b.id, left: 200, top: 0, width: 100, height: 40 },
+    { id: c.id, left: 400, top: 0, width: 100, height: 40 }
   ];
-  assert.equal(nearestParent(doc.nodeData, a.id, 440, 50, candidates), b.id);
-  assert.equal(nearestParent(doc.nodeData, a.id, 110, 20, candidates), doc.nodeData.id);
-  assert.equal(nearestParent(doc.nodeData, doc.nodeData.id, 400, 100, candidates), null);
-  assert.equal(nearestParent(doc.nodeData, a.id, 400, 100, []), null);
+  assert.equal(inferParent(doc.nodeData, moving.id, { id: moving.id, left: 350, top: 50, width: 80, height: 40 }, candidates, "right"), b.id);
+  assert.equal(inferParent(doc.nodeData, moving.id, { id: moving.id, left: 650, top: 50, width: 80, height: 40 }, candidates, "right"), null);
 });
-test("drag distance uses rich-text bounds consistently across zoom and downward layout", async () => {
-  const { nearestParent } = await import("../src/mindmap/nodeDrag");
-  const { doc, a, b, c } = fixture();
-  const candidates = [
-    { id: a.id, left: 0, top: 100, width: 400, height: 80 },
-    { id: b.id, left: 300, top: 220, width: 80, height: 40 }
-  ];
-  for (const scale of [0.25, 1, 3]) {
-    const scaled = candidates.map(rect => ({ id: rect.id, left: rect.left * scale, top: rect.top * scale, width: rect.width * scale, height: rect.height * scale }));
-    assert.equal(nearestParent(doc.nodeData, c.id, 390 * scale, 185 * scale, scaled), a.id);
-    assert.equal(nearestParent(doc.nodeData, c.id, 390 * scale, 215 * scale, scaled), b.id);
+test("drag reorders siblings before, between and after nodes in every layout and zoom", async () => {
+  const { inferSiblingSlot } = await import("../src/mindmap/nodeDrag");
+  for (const layout of ["right", "left", "down", "side"] as const) {
+    for (const scale of [0.25, 1, 3]) {
+      const doc = newDocument(), parent = newNode("A"), b1 = newNode("B1"), b2 = newNode("B2"), b3 = newNode("B3"), child = newNode("child");
+      doc.nodeData.children.push(parent); parent.children.push(b1, b2, b3); b3.children.push(child);
+      const transform = (rect: { id: string; left: number; top: number; width: number; height: number }) => {
+        const value = layout === "down" ? { ...rect, left: rect.top, top: rect.left, width: rect.height, height: rect.width }
+          : layout === "left" ? { ...rect, left: -rect.left - rect.width } : rect;
+        return { id: value.id, left: value.left * scale, top: value.top * scale, width: value.width * scale, height: value.height * scale };
+      };
+      const candidates = [doc.nodeData, parent, b1, b2, b3].map((node, index) => transform({ id: node.id, left: index < 2 ? index * 200 : 400, top: index < 2 ? 0 : (index - 2) * 100, width: 100, height: 40 }));
+      const drop = (top: number) => inferSiblingSlot(doc.nodeData, b3.id, parent.id, transform({ id: b3.id, left: 400, top, width: 100, height: 40 }), candidates, layout, scale)!;
+      assert.equal(drop(-50).targetId, b1.id);
+      assert.equal(drop(-50).placement, "before");
+      const middle = drop(50);
+      assert.equal(middle.targetId, b2.id);
+      assert.equal(middle.placement, "before");
+      assert.equal(middle.changed, true);
+      assert.equal(drop(250).placement, "after");
+      assert.equal(drop(250).changed, false); // Already last: no extra history entry.
+      const store = new DocumentStore(doc);
+      store.change(document => { moveNodes(document.nodeData, [b3.id], middle.targetId, middle.placement); });
+      assert.deepEqual(store.node(parent.id)!.children.map(node => node.id), [b1.id, b3.id, b2.id]);
+      assert.equal(store.node(b3.id)!.children[0].id, child.id);
+      assert.equal(store.undo(), true);
+      assert.deepEqual(store.node(parent.id)!.children.map(node => node.id), [b1.id, b2.id, b3.id]);
+      assert.equal(store.redo(), true);
+      assert.deepEqual(store.node(parent.id)!.children.map(node => node.id), [b1.id, b3.id, b2.id]);
+    }
   }
+});
+test("drag inserts into another parent at the inferred slot and stabilizes sibling boundaries", async () => {
+  const { inferSiblingSlot } = await import("../src/mindmap/nodeDrag");
+  const doc = newDocument(), b1 = newNode("B1"), b2 = newNode("B2"), moving = newNode("D"), old = newNode("old");
+  doc.nodeData.children.push(b1, b2, old); old.children.push(moving);
+  const candidates = [
+    { id: doc.nodeData.id, left: 0, top: 0, width: 100, height: 40 },
+    { id: b1.id, left: 200, top: 0, width: 100, height: 40 },
+    { id: b2.id, left: 200, top: 100, width: 100, height: 40 }
+  ];
+  const drop = (top: number, previous: ReturnType<typeof inferSiblingSlot> = null) => inferSiblingSlot(doc.nodeData, moving.id, doc.nodeData.id,
+    { id: moving.id, left: 200, top, width: 100, height: 40 }, candidates, "right", 1, previous)!;
+  const before = drop(-10);
+  assert.equal(drop(3, before).targetId, b1.id);
+  assert.equal(drop(8, before).targetId, b2.id);
+  const between = drop(50);
+  assert.equal(between.changed, true);
+  moveNodes(doc.nodeData, [moving.id], between.targetId, between.placement);
+  assert.deepEqual(doc.nodeData.children.map(node => node.id), [b1.id, moving.id, b2.id, old.id]);
+  assert.equal(inferSiblingSlot(doc.nodeData, moving.id, moving.id, candidates[0], candidates, "right"), null);
+});
+test("two-sided root sorting ignores opposite siblings and persists branch sides through undo", async () => {
+  const { inferSiblingSlot } = await import("../src/mindmap/nodeDrag");
+  const doc = newDocument(), l1 = newNode("L1"), r1 = newNode("R1"), l2 = newNode("L2"), r2 = newNode("R2"), moving = newNode("L3");
+  doc.nodeData.children.push(l1, r1, l2, r2, moving);
+  const candidates = [
+    { id: doc.nodeData.id, left: 0, top: 50, width: 100, height: 40 },
+    { id: l1.id, left: -200, top: 0, width: 100, height: 40 },
+    { id: r1.id, left: 200, top: 45, width: 100, height: 40 },
+    { id: l2.id, left: -200, top: 100, width: 100, height: 40 },
+    { id: r2.id, left: 200, top: 145, width: 100, height: 40 },
+    { id: moving.id, left: -200, top: 200, width: 100, height: 40 }
+  ];
+  const target = inferSiblingSlot(doc.nodeData, moving.id, doc.nodeData.id, { ...candidates[5], top: 50 }, candidates, "side")!;
+  assert.equal(target.targetId, l2.id);
+  assert.equal(target.side, "left");
+  const store = new DocumentStore(doc);
+  store.change(document => {
+    document.nodeData.children.forEach(node => { node.side = node.id === r1.id || node.id === r2.id ? "right" : "left"; });
+    moveNodes(document.nodeData, [moving.id], target.targetId, target.placement);
+  });
+  assert.equal(parseDocument(store.document)!.nodeData.children.find(node => node.id === r1.id)!.side, "right");
+  assert.equal(store.undo(), true);
+  assert.equal(store.node(r1.id)!.side, undefined);
+  assert.equal(store.redo(), true);
+  assert.equal(store.node(r1.id)!.side, "right");
+  const crossed = inferSiblingSlot(doc.nodeData, moving.id, doc.nodeData.id, { ...candidates[5], left: 200 }, candidates, "side")!;
+  assert.equal(crossed.side, "right");
+  assert.equal(crossed.changed, true);
 });
 test("drag reparenting keeps descendants and expands destination in a single undo step", () => {
   const { doc, a, b, c } = fixture(); b.expanded = false;

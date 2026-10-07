@@ -126,7 +126,8 @@ final class ExcalidrawIOSUITests: XCTestCase {
         accessory.buttons["收起键盘"].tap()
         XCTAssertTrue(web.buttons["编辑节点"].waitForExistence(timeout: 5))
         let start = moving.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        let end = target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).withOffset(CGVector(dx: 0, dy: 12))
+        // Move beyond the downward alignment band to attach to the target.
+        let end = target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).withOffset(CGVector(dx: 0, dy: 35))
         start.press(forDuration: 0.6, thenDragTo: end)
         XCTAssertTrue(web.buttons["编辑节点"].waitForExistence(timeout: 5))
         XCTAssertFalse(web.menuItems["添加子节点"].exists)
@@ -143,6 +144,73 @@ final class ExcalidrawIOSUITests: XCTestCase {
         web.buttons.matching(identifier: "折叠节点").firstMatch.tap()
         XCTAssertEqual(web.buttons.matching(identifier: "选择节点").count, 1, "Reparenting survives close/reopen")
         attachScreenshot(app, name: "iPhone persisted parent relationship")
+    }
+
+    func testLayoutDragSiblingOrderAndParentPersistence() {
+        for layout in ["right", "left", "down", "side"] {
+            let app = makeApplication()
+            app.launchEnvironment["SIYE_UI_TEST_FIXTURE"] = "documents"
+            app.launchEnvironment["SIYE_UI_TEST_LAYOUT_DRAG"] = layout
+            app.launch()
+            let all = app.buttons["all-documents"]
+            XCTAssertTrue(all.waitForExistence(timeout: 15)); all.tap()
+            let file = app.staticTexts["Test Mind Map"].firstMatch
+            XCTAssertTrue(file.waitForExistence(timeout: 15)); file.tap()
+            let web = app.webViews["editor-ready"]
+            XCTAssertTrue(web.waitForExistence(timeout: 30))
+            let b1 = web.staticTexts["B1"].firstMatch
+            let b2 = web.staticTexts["B2"].firstMatch
+            let b3 = web.staticTexts["B3"].firstMatch
+            let c = web.staticTexts["C"].firstMatch
+            XCTAssertTrue(b1.waitForExistence(timeout: 10)); XCTAssertTrue(b2.exists); XCTAssertTrue(b3.exists)
+            let down = layout == "down"
+            let first = b1.frame, second = b2.frame
+            let destination = web.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                dx: (down ? (first.midX + second.midX) / 2 : first.midX) - web.frame.minX,
+                dy: (down ? first.midY : (first.midY + second.midY) / 2) - web.frame.minY))
+            b3.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.6, thenDragTo: destination)
+            XCTAssertTrue(web.buttons["编辑节点"].waitForExistence(timeout: 5))
+            let ordered = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                down ? b1.frame.midX < b3.frame.midX && b3.frame.midX < b2.frame.midX
+                     : b1.frame.midY < b3.frame.midY && b3.frame.midY < b2.frame.midY
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [ordered], timeout: 5), .completed, "\(layout): B1, B3, B2")
+            XCTAssertTrue(web.staticTexts["保留子节点"].exists)
+            attachScreenshot(app, name: "\(layout) iPhone B1 B3 B2 order")
+            app.buttons["返回"].tap()
+            XCTAssertTrue(file.waitForExistence(timeout: 15)); file.tap()
+            XCTAssertTrue(web.waitForExistence(timeout: 30))
+            XCTAssertTrue(b3.waitForExistence(timeout: 10))
+            if down { XCTAssertLessThan(b1.frame.midX, b3.frame.midX); XCTAssertLessThan(b3.frame.midX, b2.frame.midX) }
+            else { XCTAssertLessThan(b1.frame.midY, b3.frame.midY); XCTAssertLessThan(b3.frame.midY, b2.frame.midY) }
+            if layout == "side" { XCTAssertLessThan(web.staticTexts["左侧"].firstMatch.frame.midX, web.staticTexts["A"].firstMatch.frame.midX) }
+            attachScreenshot(app, name: "\(layout) iPhone persisted sibling order")
+
+            // Move outward into the B1/C lane, without dragging close to B1.
+            XCTAssertTrue(c.exists)
+            let parent = b1.frame, child = c.frame
+            let gap = web.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                dx: (down ? parent.midX : (parent.midX + child.midX) / 2) - web.frame.minX,
+                dy: (down ? (parent.midY + child.midY) / 2 : parent.midY) - web.frame.minY))
+            b3.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.6, thenDragTo: gap)
+            XCTAssertTrue(web.buttons["编辑节点"].waitForExistence(timeout: 5))
+            attachScreenshot(app, name: "\(layout) iPhone layout-based reparent")
+            web.buttons["大纲"].tap()
+            let fold = web.buttons.matching(identifier: "折叠节点").firstMatch
+            XCTAssertTrue(fold.waitForExistence(timeout: 5)); fold.tap()
+            XCTAssertFalse(b3.exists, "\(layout): B3 is inside B1")
+            XCTAssertFalse(web.staticTexts["保留子节点"].exists)
+            XCTAssertEqual(web.buttons.matching(identifier: "选择节点").count, layout == "side" ? 3 : 2, "Only B1, B2 and the optional opposite branch remain")
+            web.buttons["展开节点"].firstMatch.tap()
+            app.buttons["返回"].tap()
+            XCTAssertTrue(file.waitForExistence(timeout: 15)); file.tap()
+            XCTAssertTrue(web.waitForExistence(timeout: 30))
+            XCTAssertTrue(fold.waitForExistence(timeout: 5)); fold.tap()
+            XCTAssertFalse(b3.exists, "\(layout): parent change persists")
+            XCTAssertEqual(web.buttons.matching(identifier: "选择节点").count, layout == "side" ? 3 : 2, "Reopening preserves the entire moved subtree under B1")
+            attachScreenshot(app, name: "\(layout) iPhone persisted parent and subtree")
+            app.terminate()
+        }
     }
 
     func testMindMapQuickDoubleReturnCreatesSibling() {

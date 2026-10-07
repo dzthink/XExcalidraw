@@ -265,3 +265,5 @@ html[data-native-desktop="true"] .siye-editor .mind-elixir-toolbar.lt{top:16px}
 /* Dismissing More consumes the outside tap instead of clearing node selection. */
 .siye-editor .mindmap-mobile-menu-backdrop{position:absolute;inset:0;z-index:30}
 .siye-editor .mindmap-mobile-node-toolbar.has-open-menu{z-index:31}
+
+.siye-editor .siye-node-drag-line .siye-node-drag-slot{stroke-width:3;stroke-dasharray:none}

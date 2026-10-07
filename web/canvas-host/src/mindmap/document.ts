@@ -1,5 +1,5 @@
 export type RichDocument = { type: string; attrs?: Record<string, unknown>; text?: string; marks?: { type: string; attrs?: Record<string, unknown> }[]; content?: RichDocument[] };
-export type MapNode = { id: string; content: RichDocument; note: string; expanded: boolean; children: MapNode[] };
+export type MapNode = { id: string; content: RichDocument; note: string; expanded: boolean; side?: "left" | "right"; children: MapNode[] };
 export type MapDocument = {
   format: "siye-mindmap"; version: 2; nodeData: MapNode;
   settings: { layout: "side" | "left" | "right" | "down"; palette: "gray" | "blue" | "green"; noteDisplay: "all" | "first" };
@@ -75,6 +75,7 @@ export function parseDocument(data: unknown): MapDocument | null {
     const ids = new Set<string>();
     const validate = (node: MapNode, depth: number): boolean => {
       if (!node || depth > 100 || typeof node.id !== "string" || !node.id || ids.has(node.id) || node.content?.type !== "doc" || typeof node.note !== "string" || typeof node.expanded !== "boolean" || !Array.isArray(node.children)) return false;
+      if (node.side !== undefined && node.side !== "left" && node.side !== "right") return false;
       ids.add(node.id); return node.children.every(child => validate(child, depth + 1));
     };
     if (!validate(doc.nodeData, 0) || !["side", "left", "right", "down"].includes(doc.settings.layout) || !["gray", "blue", "green"].includes(doc.settings.palette) || !["all", "first"].includes(doc.settings.noteDisplay)) return null;
