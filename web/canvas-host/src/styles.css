@@ -75,6 +75,8 @@ body,
 
 /* macOS uses the native window toolbar for drawing tools. */
 html[data-native-desktop="true"] .excalidraw .shapes-section,
+html[data-native-desktop="true"] .excalidraw .App-toolbar-container,
+html[data-native-desktop="true"] .excalidraw .mobile-misc-tools-container,
 html[data-native-desktop="true"] .excalidraw .layer-ui__wrapper__top-right {
   display: none;
 }

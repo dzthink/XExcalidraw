@@ -16,6 +16,55 @@ final class ExcalidrawMacUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["canvas-ready"].waitForExistence(timeout: 30), app.debugDescription)
     }
 
+    func testToolbarSwitchesBetweenDrawingAndMindMap() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
+        app.launchEnvironment["SIYE_UI_TEST_FIXTURE"] = "documents"
+        app.launch(); app.activate()
+        if !app.windows.firstMatch.waitForExistence(timeout: 3) { app.typeKey("n", modifierFlags: .command) }
+        let window = app.windows.firstMatch
+        let drawing = window.descendants(matching: .any)["file-row-Test Canvas.excalidraw"]
+        let mindMap = window.descendants(matching: .any)["file-row-Test Mind Map.mindmap"]
+        let outline = window.radioButtons["大纲"]
+        let map = window.radioButtons["思维导图"]
+        let rectangle = window.buttons["Rectangle"]
+        let webDrawingTools = window.radioButtons.matching(NSPredicate(format: "label BEGINSWITH %@", "Rectangle"))
+        XCTAssertTrue(drawing.waitForExistence(timeout: 10))
+        XCTAssertTrue(window.descendants(matching: .any)["canvas-ready"].waitForExistence(timeout: 30))
+        app.activate()
+        drawing.click()
+        XCTAssertTrue(rectangle.waitForExistence(timeout: 30))
+
+        // Revisit the same drawing without changing its tool state between loads.
+        for _ in 0..<3 {
+            mindMap.click()
+            XCTAssertTrue(outline.waitForExistence(timeout: 10))
+            XCTAssertTrue(map.exists)
+            XCTAssertFalse(rectangle.exists)
+            map.click()
+            let mapSelected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == 1"), object: map)
+            XCTAssertEqual(XCTWaiter.wait(for: [mapSelected], timeout: 10), .completed)
+            drawing.click()
+            XCTAssertTrue(rectangle.waitForExistence(timeout: 10))
+            XCTAssertFalse(outline.exists)
+            XCTAssertFalse(map.exists)
+            XCTAssertEqual(webDrawingTools.count, 0, "Narrow desktop windows use only the native drawing toolbar")
+        }
+        rectangle.click()
+        let toolSelected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Selected"), object: rectangle)
+        XCTAssertEqual(XCTWaiter.wait(for: [toolSelected], timeout: 10), .completed)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Drawing toolbar after repeated mind map switches"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        mindMap.click()
+        XCTAssertTrue(map.waitForExistence(timeout: 10))
+        XCTAssertFalse(rectangle.exists)
+        outline.click()
+        let outlineSelected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == 1"), object: outline)
+        XCTAssertEqual(XCTWaiter.wait(for: [outlineSelected], timeout: 10), .completed)
+    }
+
     func testNodeDragReparentsSubtreeAndPersists() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]

@@ -284,6 +284,8 @@ export default function App() {
       }
       if (message.type === "loadScene") {
         loadGeneration.current++; revision.current = 0; savedRevision.current = 0;
+        // Returning to the same drawing must report its toolbar state again.
+        lastToolbarState.current = "";
         const payload = message.payload as LoadScenePayload;
         setSceneLoadKey(value => value + 1);
         setLoadState({

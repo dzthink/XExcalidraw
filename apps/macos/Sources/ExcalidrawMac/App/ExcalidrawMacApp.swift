@@ -740,7 +740,7 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
     private func handleMessage(type: String, payload: [String: Any]) {
         if type == "desktopToolbarState" {
             guard (payload["docId"] as? String ?? "") == (currentDocumentID ?? "") else { return }
-            editorKind = payload["kind"] as? String ?? "drawing"
+            guard payload["kind"] as? String == editorKind else { return }
             editorViewMode = payload["viewMode"] as? String ?? "outline"
             activeDrawingTool = payload["activeTool"] as? String ?? "selection"
             drawingToolLocked = payload["locked"] as? Bool ?? false
@@ -1246,6 +1246,18 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
     private func deliver(type: String, payload: [String: Any]) {
         if (type == "loadScene" || type == "updateDocId"), let docId = payload["docId"] as? String {
             currentDocumentID = docId
+            if type == "loadScene" {
+                // Switch toolbar immediately, before the web editor reports its state.
+                let scene = payload["sceneJson"] as? [String: Any]
+                let views = scene?["views"] as? [String: Any]
+                let appState = scene?["appState"] as? [String: Any]
+                let activeTool = appState?["activeTool"] as? [String: Any]
+                editorKind = docId.lowercased().hasSuffix(".mindmap") ? "mindmap" : "drawing"
+                editorViewMode = views?["mode"] as? String ?? "outline"
+                activeDrawingTool = activeTool?["type"] as? String ?? "selection"
+                drawingToolLocked = activeTool?["locked"] as? Bool ?? false
+                editorReadOnly = payload["readOnly"] as? Bool ?? false
+            }
             let context = documentManager.attachmentContext(docId: docId)
             schemeHandler.setAttachmentContext(documentURL: context?.documentURL, repositoryURL: context?.repositoryURL)
         }
