@@ -262,7 +262,7 @@ export default function App() {
           if (payload.action === "lock") {
             api.updateScene({ appState: { activeTool: { ...activeTool, locked: !activeTool.locked } } });
           } else if (payload.action === "tool") {
-            const tool = (["hand", "selection", "rectangle", "diamond", "ellipse", "arrow", "line", "freedraw", "text", "image", "eraser", "frame", "embeddable", "laser"] as const).find(type => type === payload.value);
+            const tool = (["hand", "selection", "rectangle", "diamond", "ellipse", "arrow", "line", "freedraw", "text", "image", "eraser", "frame", "embeddable", "laser", "lasso"] as const).find(type => type === payload.value);
             if (tool) api.setActiveTool({ type: tool, locked: activeTool.locked });
           }
           reportToolbarState(api.getAppState());

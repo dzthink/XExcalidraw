@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@excalidraw/excalidraw": "^0.18.0",
+    "@excalidraw/excalidraw": "0.18.0-864353b",
     "@uiw/react-md-editor": "4.1.1",
     "dompurify": "3.4.16",
     "katex": "0.16.28",

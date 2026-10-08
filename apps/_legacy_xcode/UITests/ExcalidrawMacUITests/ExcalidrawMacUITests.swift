@@ -18,8 +18,10 @@ final class ExcalidrawMacUITests: XCTestCase {
 
     func testToolbarSwitchesBetweenDrawingAndMindMap() throws {
         let app = XCUIApplication()
+        let fixtureRoot = FileManager.default.temporaryDirectory.appendingPathComponent("UITests-expanded-tools-" + UUID().uuidString)
         app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
         app.launchEnvironment["SIYE_UI_TEST_FIXTURE"] = "documents"
+        app.launchEnvironment["SIYE_UI_TEST_FIXTURE_ROOT"] = fixtureRoot.path
         app.launch(); app.activate()
         if !app.windows.firstMatch.waitForExistence(timeout: 3) { app.typeKey("n", modifierFlags: .command) }
         let window = app.windows.firstMatch
@@ -51,6 +53,14 @@ final class ExcalidrawMacUITests: XCTestCase {
             XCTAssertFalse(outline.exists)
             XCTAssertFalse(map.exists)
             XCTAssertEqual(webDrawingTools.count, 0, "Narrow desktop windows use only the native drawing toolbar")
+        }
+        XCTAssertFalse(window.toolbars.menuButtons["More"].exists)
+        for label in ["Frame", "Web embed", "Laser pointer", "Lasso selection"] {
+            let tool = window.toolbars.buttons[label]
+            XCTAssertTrue(tool.exists, "Additional tools are directly accessible in the title bar")
+            tool.click()
+            let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Selected"), object: tool)
+            XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 10), .completed)
         }
         rectangle.click()
         let toolSelected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Selected"), object: rectangle)
@@ -89,6 +99,27 @@ final class ExcalidrawMacUITests: XCTestCase {
         wideScreenshot.name = "Original Excalidraw panels in a wide window"
         wideScreenshot.lifetime = .keepAlways
         add(wideScreenshot)
+        web.buttons["Close"].firstMatch.click()
+        rectangle.click()
+        web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35))
+            .click(forDuration: 0.1, thenDragTo: web.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.55)))
+        let selection = window.toolbars.buttons["Selection"]
+        let drawn = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Selected"), object: selection)
+        XCTAssertEqual(XCTWaiter.wait(for: [drawn], timeout: 10), .completed)
+        let savedDrawing = fixtureRoot.appendingPathComponent("Test Documents/Test Canvas.excalidraw")
+        let saved = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            guard let data = try? Data(contentsOf: savedDrawing),
+                  let scene = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let elements = scene["elements"] as? [[String: Any]] else { return false }
+            return elements.contains { $0["type"] as? String == "rectangle" && $0["isDeleted"] as? Bool != true }
+        }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [saved], timeout: 10), .completed)
+        // Reopen the drawing to verify the upgraded editor saves and restores elements.
+        mindMap.click()
+        XCTAssertTrue(map.waitForExistence(timeout: 10))
+        drawing.click()
+        XCTAssertTrue(selection.waitForExistence(timeout: 10))
+        XCTAssertTrue(window.descendants(matching: .any)["canvas-ready"].waitForExistence(timeout: 10))
         mindMap.click()
         XCTAssertTrue(map.waitForExistence(timeout: 10))
         XCTAssertFalse(rectangle.exists)

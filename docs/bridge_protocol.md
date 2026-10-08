@@ -73,7 +73,9 @@ The web editor reports the current document and toolbar selection. The native ho
 }
 ```
 
-The macOS bootstrap sets `document.documentElement.dataset.nativeDesktop = "true"`. Only this host replaces the central web drawing toolbar and view tabs with native title-bar controls. The additional drawing tools remain in the title-bar tools menu; format controls and the Library button keep Excalidraw’s original layout and behavior inside the editor.
+The macOS bootstrap sets `document.documentElement.dataset.nativeDesktop = "true"`. Only this host replaces the central web drawing toolbar and view tabs with native title-bar controls. Frame, Web embed, Laser pointer, and Lasso selection appear as direct title-bar buttons alongside the main tools; format controls and the Library button keep Excalidraw’s original layout and behavior inside the editor.
+
+The web host pins the upstream `0.18.0-864353b` prerelease to provide native lasso selection while retaining the existing format and Library panel layouts; stable `0.18.0` does not include this tool.
 
 ### desktopToolbarAction (Native → Web, macOS)
 

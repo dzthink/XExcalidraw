@@ -42,7 +42,8 @@ private final class CanvasSession: ObservableObject {
     let viewModel: WebCanvasViewModel
     private var subscriptions = Set<AnyCancellable>()
 #if DEBUG
-    private static let fixtureRoot = FileManager.default.temporaryDirectory.appendingPathComponent("UITests-" + UUID().uuidString)
+    private static let fixtureRoot = ProcessInfo.processInfo.environment["SIYE_UI_TEST_FIXTURE_ROOT"].map { URL(fileURLWithPath: $0) }
+        ?? FileManager.default.temporaryDirectory.appendingPathComponent("UITests-" + UUID().uuidString)
     private static let fixtureDefaultsName = "siye.uitests." + UUID().uuidString
 #endif
 
@@ -1395,7 +1396,11 @@ private struct DesktopEditorToolbar: View {
         ("freedraw", "pencil.tip", "Draw"),
         ("text", "textformat", "Text"),
         ("image", "photo", "Insert image"),
-        ("eraser", "eraser", "Eraser")
+        ("eraser", "eraser", "Eraser"),
+        ("frame", "rectangle.dashed", "Frame"),
+        ("embeddable", "link", "Web embed"),
+        ("laser", "cursorarrow.rays", "Laser pointer"),
+        ("lasso", "lasso", "Lasso selection")
     ]
 
     var body: some View {
@@ -1411,22 +1416,12 @@ private struct DesktopEditorToolbar: View {
             .frame(width: 168)
             .accessibilityIdentifier("document-view-switcher")
         } else if !viewModel.editorReadOnly {
-            HStack(spacing: 2) {
+            HStack(spacing: 0) {
                 toolButton("lock", symbol: viewModel.drawingToolLocked ? "lock.fill" : "lock.open", label: "Keep selected tool active", selected: viewModel.drawingToolLocked)
                 Divider().frame(height: 20).padding(.horizontal, 3)
                 ForEach(tools, id: \.type) { tool in
                     toolButton("tool", value: tool.type, symbol: tool.symbol, label: tool.label, selected: viewModel.activeDrawingTool == tool.type)
                 }
-                Menu {
-                    Button("Frame") { viewModel.performToolbarAction("tool", value: "frame") }
-                    Button("Embed") { viewModel.performToolbarAction("tool", value: "embeddable") }
-                    Button("Laser pointer") { viewModel.performToolbarAction("tool", value: "laser") }
-                } label: {
-                    Image(systemName: "ellipsis").frame(width: 24, height: 28)
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .help("More tools")
             }
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Drawing tools")
@@ -1439,7 +1434,7 @@ private struct DesktopEditorToolbar: View {
         } label: {
             Image(systemName: symbol)
                 .font(.system(size: 14))
-                .frame(width: 28, height: 28)
+                .frame(width: 24, height: 28)
                 .background(selected ? Color.accentColor.opacity(0.18) : Color.clear)
                 .cornerRadius(6)
         }
