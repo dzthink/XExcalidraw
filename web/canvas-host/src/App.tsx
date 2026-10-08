@@ -226,16 +226,12 @@ export default function App() {
   const lastToolbarState = useRef("");
   const reportToolbarState = useCallback((appState: ReturnType<ExcalidrawImperativeAPI["getAppState"]>) => {
     if (document.documentElement.dataset.nativeDesktop !== "true" || loadState.docId.toLowerCase().endsWith(".mindmap")) return;
-    const formatOpen = appState.openMenu === "shape";
-    document.documentElement.dataset.nativeFormatOpen = String(formatOpen);
     const payload: DesktopToolbarStatePayload = {
       docId: loadState.docId,
       kind: "drawing",
       readOnly: loadState.readOnly,
       activeTool: appState.activeTool.type,
-      locked: appState.activeTool.locked,
-      formatOpen,
-      libraryOpen: appState.openSidebar?.name === "default" && appState.openSidebar.tab === "library"
+      locked: appState.activeTool.locked
     };
     const signature = JSON.stringify(payload);
     if (lastToolbarState.current === signature) return;
@@ -261,12 +257,9 @@ export default function App() {
         const payload = message.payload as DesktopToolbarActionPayload;
         if (payload.action === "library") {
           api.toggleSidebar({ name: "default", tab: "library" });
-          reportToolbarState(api.getAppState());
         } else if (!loadState.readOnly) {
           const activeTool = api.getAppState().activeTool;
-          if (payload.action === "format") {
-            api.updateScene({ appState: { openMenu: api.getAppState().openMenu === "shape" ? null : "shape" } });
-          } else if (payload.action === "lock") {
+          if (payload.action === "lock") {
             api.updateScene({ appState: { activeTool: { ...activeTool, locked: !activeTool.locked } } });
           } else if (payload.action === "tool") {
             const tool = (["hand", "selection", "rectangle", "diamond", "ellipse", "arrow", "line", "freedraw", "text", "image", "eraser", "frame", "embeddable", "laser"] as const).find(type => type === payload.value);

@@ -371,18 +371,6 @@ struct ContentView: View {
                 .background(Color(nsColor: .windowBackgroundColor))
             }
         }
-        .overlay(alignment: .topLeading) {
-            if viewModel.editorKind == "drawing" && !viewModel.editorReadOnly {
-                DesktopDrawingSideControls(viewModel: viewModel, side: .leading)
-                    .padding(12)
-            }
-        }
-        .overlay(alignment: .topTrailing) {
-            if viewModel.editorKind == "drawing" {
-                DesktopDrawingSideControls(viewModel: viewModel, side: .trailing)
-                    .padding(12)
-            }
-        }
         .overlay(alignment: .bottomLeading) {
             if viewModel.isDocumentLoading {
                 HStack { ProgressView().controlSize(.small); Text("正在读取文件…") }
@@ -619,8 +607,6 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
     @Published var editorViewMode = "outline"
     @Published var activeDrawingTool = "selection"
     @Published var drawingToolLocked = false
-    @Published var drawingFormatOpen = false
-    @Published var drawingLibraryOpen = false
     @Published var editorReadOnly = false
     let webView: WKWebView
 
@@ -758,8 +744,6 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
             editorViewMode = payload["viewMode"] as? String ?? "outline"
             activeDrawingTool = payload["activeTool"] as? String ?? "selection"
             drawingToolLocked = payload["locked"] as? Bool ?? false
-            drawingFormatOpen = payload["formatOpen"] as? Bool ?? false
-            drawingLibraryOpen = payload["libraryOpen"] as? Bool ?? false
             editorReadOnly = payload["readOnly"] as? Bool ?? false
         } else if type == "saveScene" {
             handleSave(payload: payload)
@@ -1272,8 +1256,6 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
                 editorViewMode = views?["mode"] as? String ?? "outline"
                 activeDrawingTool = activeTool?["type"] as? String ?? "selection"
                 drawingToolLocked = activeTool?["locked"] as? Bool ?? false
-                drawingFormatOpen = appState?["openMenu"] as? String == "shape"
-                drawingLibraryOpen = false
                 editorReadOnly = payload["readOnly"] as? Bool ?? false
             }
             let context = documentManager.attachmentContext(docId: docId)
@@ -1435,6 +1417,16 @@ private struct DesktopEditorToolbar: View {
                 ForEach(tools, id: \.type) { tool in
                     toolButton("tool", value: tool.type, symbol: tool.symbol, label: tool.label, selected: viewModel.activeDrawingTool == tool.type)
                 }
+                Menu {
+                    Button("Frame") { viewModel.performToolbarAction("tool", value: "frame") }
+                    Button("Embed") { viewModel.performToolbarAction("tool", value: "embeddable") }
+                    Button("Laser pointer") { viewModel.performToolbarAction("tool", value: "laser") }
+                } label: {
+                    Image(systemName: "ellipsis").frame(width: 24, height: 28)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("More tools")
             }
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Drawing tools")
@@ -1454,60 +1446,6 @@ private struct DesktopEditorToolbar: View {
         .buttonStyle(.borderless)
         .accessibilityLabel(label)
         .accessibilityValue(selected ? "Selected" : "")
-        .help(label)
-    }
-}
-
-private struct DesktopDrawingSideControls: View {
-    enum Side { case leading, trailing }
-
-    @ObservedObject var viewModel: WebCanvasViewModel
-    let side: Side
-
-    var body: some View {
-        HStack(spacing: 4) {
-            if side == .leading {
-                panelButton("format", title: "格式", symbol: "slider.horizontal.3", label: "Format", selected: viewModel.drawingFormatOpen)
-                Divider().frame(height: 20).padding(.horizontal, 2)
-                extraTool("frame", symbol: "rectangle.dashed", label: "Frame")
-                extraTool("embeddable", symbol: "link", label: "Embed")
-                extraTool("laser", symbol: "cursorarrow.rays", label: "Laser pointer")
-            } else {
-                panelButton("library", title: "素材库", symbol: "books.vertical", label: "Library", selected: viewModel.drawingLibraryOpen)
-            }
-        }
-        .padding(6)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(nsColor: .separatorColor), lineWidth: 0.5))
-        .disabled(!viewModel.isCanvasReady || viewModel.isDocumentLoading)
-        .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(side == .leading ? "drawing-left-controls" : "drawing-right-controls")
-    }
-
-    private func panelButton(_ action: String, title: String, symbol: String, label: String, selected: Bool) -> some View {
-        Button { viewModel.performToolbarAction(action) } label: {
-            Label(title, systemImage: symbol)
-                .padding(.horizontal, 6).frame(height: 28)
-                .background(selected ? Color.accentColor.opacity(0.18) : Color.clear)
-                .cornerRadius(6)
-        }
-        .buttonStyle(.borderless)
-        .accessibilityLabel(label)
-        .accessibilityValue(selected ? "Selected" : "")
-        .accessibilityIdentifier("drawing-\(action)-button")
-        .help(title)
-    }
-
-    private func extraTool(_ type: String, symbol: String, label: String) -> some View {
-        Button { viewModel.performToolbarAction("tool", value: type) } label: {
-            Image(systemName: symbol).font(.system(size: 14)).frame(width: 28, height: 28)
-                .background(viewModel.activeDrawingTool == type ? Color.accentColor.opacity(0.18) : Color.clear)
-                .cornerRadius(6)
-        }
-        .buttonStyle(.borderless)
-        .accessibilityLabel(label)
-        .accessibilityValue(viewModel.activeDrawingTool == type ? "Selected" : "")
         .help(label)
     }
 }

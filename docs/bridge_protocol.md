@@ -73,18 +73,18 @@ The web editor reports the current document and toolbar selection. The native ho
 }
 ```
 
-The macOS bootstrap sets `document.documentElement.dataset.nativeDesktop = "true"`. Only this host replaces the main web drawing toolbar and view tabs with native title-bar controls. Native buttons inside the editor provide the left format panel and additional drawing tools (Frame, Embed, Laser pointer), and the right library panel; these actions remain directly visible outside the title bar.
+The macOS bootstrap sets `document.documentElement.dataset.nativeDesktop = "true"`. Only this host replaces the central web drawing toolbar and view tabs with native title-bar controls. The additional drawing tools remain in the title-bar tools menu; format controls and the Library button keep Excalidraw’s original layout and behavior inside the editor.
 
 ### desktopToolbarAction (Native → Web, macOS)
 
 ```ts
 {
-  action: "tool" | "lock" | "format" | "library" | "view";
+  action: "tool" | "lock" | "library" | "view";
   value?: string;
 }
 ```
 
-`tool` selects a supported Excalidraw tool; `lock` toggles tool locking; `format` toggles the shape format panel; `library` toggles the default sidebar's library tab. Drawing `desktopToolbarState` reports `formatOpen` and `libraryOpen` to keep native buttons synchronized with web panel state. `view` accepts `outline` or `map` and flushes pending mind-map edits before switching. Drawing mutations are ignored in read-only documents. Drawing commands return keyboard focus to the canvas so existing shortcuts remain usable.
+`tool` selects a supported Excalidraw tool; `lock` toggles tool locking; `library` toggles the default sidebar's library tab. `view` accepts `outline` or `map` and flushes pending mind-map edits before switching. Drawing mutations are ignored in read-only documents. Drawing commands return keyboard focus to the canvas so existing shortcuts remain usable.
 
 ### didChange
 ```json

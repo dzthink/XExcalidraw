@@ -75,9 +75,8 @@ body,
 
 /* macOS uses the native window toolbar for drawing tools. */
 html[data-native-desktop="true"] .excalidraw .shapes-section,
-html[data-native-desktop="true"] .excalidraw .App-toolbar-container,
-html[data-native-desktop="true"] .excalidraw .mobile-misc-tools-container,
-html[data-native-desktop="true"] .excalidraw .layer-ui__wrapper__top-right {
+html[data-native-desktop="true"] .excalidraw .App-top-bar .App-toolbar,
+html[data-native-desktop="true"] .excalidraw .mobile-misc-tools-container .ToolIcon {
   display: none;
 }
 html[data-native-desktop="true"] .excalidraw .App-menu_top {
@@ -88,32 +87,4 @@ html[data-native-desktop="true"] .excalidraw .FixedSideContainer_side_top {
 }
 html[data-native-desktop="true"] .excalidraw .App-menu_top > .Stack {
   padding-top: 0;
-}
-
-/* Leave room for the native controls at the editor's left and right edges. */
-html[data-native-desktop="true"] .excalidraw .selected-shape-actions {
-  margin-top: 48px;
-}
-html[data-native-desktop="true"]:not([data-native-format-open="true"]) .excalidraw .selected-shape-actions,
-html[data-native-desktop="true"]:not([data-native-format-open="true"]) .excalidraw .App-mobile-menu {
-  display: none;
-}
-html[data-native-desktop="true"] .excalidraw .App-mobile-menu {
-  position: fixed;
-  top: 64px;
-  bottom: 76px;
-  left: 12px;
-  width: 240px;
-  padding: 12px;
-  border: 1px solid var(--sidebar-border-color);
-  border-radius: 10px;
-  background: var(--island-bg-color);
-  box-shadow: var(--sidebar-shadow);
-}
-html[data-native-desktop="true"] .excalidraw .sidebar {
-  top: 64px;
-}
-/* The default English web UI's Edit action is replaced by the native entry. */
-html[data-native-desktop="true"] .excalidraw .App-toolbar-content > button[aria-label="Edit"] {
-  display: none;
 }
