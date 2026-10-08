@@ -110,7 +110,7 @@ export type WebToNativeMessage =
   | BridgeEnvelope<{ cursor: string }>;
 
 export type DesktopToolbarActionPayload = {
-  action: "tool" | "lock" | "library" | "view";
+  action: "tool" | "lock" | "format" | "library" | "view";
   value?: string;
 };
 
@@ -120,5 +120,7 @@ export type DesktopToolbarStatePayload = {
   readOnly: boolean;
   activeTool?: string;
   locked?: boolean;
+  formatOpen?: boolean;
+  libraryOpen?: boolean;
   viewMode?: "outline" | "map";
 };

@@ -53,13 +53,61 @@ final class ExcalidrawMacUITests: XCTestCase {
         rectangle.click()
         let toolSelected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Selected"), object: rectangle)
         XCTAssertEqual(XCTWaiter.wait(for: [toolSelected], timeout: 10), .completed)
+        let leftControls = window.descendants(matching: .any)["drawing-left-controls"]
+        let rightControls = window.descendants(matching: .any)["drawing-right-controls"]
+        XCTAssertTrue(leftControls.exists)
+        XCTAssertTrue(rightControls.exists)
+        for label in ["Frame", "Embed", "Laser pointer"] {
+            let tool = leftControls.buttons[label]
+            XCTAssertTrue(tool.exists, "Additional tools remain directly visible in the editor")
+            XCTAssertFalse(window.toolbars.buttons[label].exists)
+            tool.click()
+            let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Selected"), object: tool)
+            XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 10), .completed)
+        }
+        rectangle.click()
+        let format = window.buttons["drawing-format-button"]
+        format.click()
+        let formatSelected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Selected"), object: format)
+        XCTAssertEqual(XCTWaiter.wait(for: [formatSelected], timeout: 10), .completed)
+        XCTAssertTrue(window.popUpButtons["Stroke"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(window.buttons["Edit"].firstMatch.exists, "The native format button replaces the web footer entry")
+        let library = window.buttons["drawing-library-button"]
+        XCTAssertTrue(rightControls.buttons["drawing-library-button"].exists)
+        XCTAssertFalse(window.toolbars.buttons["Library"].exists)
+        library.click()
+        let librarySelected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Selected"), object: library)
+        XCTAssertEqual(XCTWaiter.wait(for: [librarySelected], timeout: 10), .completed)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "Drawing toolbar after repeated mind map switches"
+        screenshot.name = "Native drawing side controls and format and library panels"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+        library.click()
+        let libraryClosed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value != %@", "Selected"), object: library)
+        XCTAssertEqual(XCTWaiter.wait(for: [libraryClosed], timeout: 10), .completed)
+        format.click()
+        let formatClosed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value != %@", "Selected"), object: format)
+        XCTAssertEqual(XCTWaiter.wait(for: [formatClosed], timeout: 10), .completed)
+        XCTAssertFalse(window.popUpButtons["Stroke"].firstMatch.exists)
+        // Excalidraw changes its panel layout as the editor grows beyond mobile width.
+        let corner = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1)).withOffset(CGVector(dx: -3, dy: -3))
+        corner.click(forDuration: 0.1, thenDragTo: corner.withOffset(CGVector(dx: 220, dy: 0)))
+        let widerWindow = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in window.frame.width > 1000 }, object: window)
+        XCTAssertEqual(XCTWaiter.wait(for: [widerWindow], timeout: 10), .completed)
+        format.click()
+        XCTAssertTrue(window.popUpButtons["Stroke"].firstMatch.waitForExistence(timeout: 5))
+        library.click()
+        let wideLibrarySelected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Selected"), object: library)
+        XCTAssertEqual(XCTWaiter.wait(for: [wideLibrarySelected], timeout: 10), .completed)
+        let wideScreenshot = XCTAttachment(screenshot: app.screenshot())
+        wideScreenshot.name = "Native drawing controls and panels in a wide window"
+        wideScreenshot.lifetime = .keepAlways
+        add(wideScreenshot)
         mindMap.click()
         XCTAssertTrue(map.waitForExistence(timeout: 10))
         XCTAssertFalse(rectangle.exists)
+        XCTAssertFalse(leftControls.exists)
+        XCTAssertFalse(rightControls.exists)
         outline.click()
         let outlineSelected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == 1"), object: outline)
         XCTAssertEqual(XCTWaiter.wait(for: [outlineSelected], timeout: 10), .completed)
