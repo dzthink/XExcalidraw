@@ -27,32 +27,38 @@ final class ExcalidrawMacUITests: XCTestCase {
         let window = app.windows.firstMatch
         let drawing = window.descendants(matching: .any)["file-row-Test Canvas.excalidraw"]
         let mindMap = window.descendants(matching: .any)["file-row-Test Mind Map.mindmap"]
-        let outline = window.radioButtons["大纲"]
-        let map = window.radioButtons["思维导图"]
+        let outline = window.buttons["切换到思维导图"]
+        let map = window.buttons["切换到大纲视图"]
         let rectangle = window.buttons["Rectangle"]
         let webDrawingTools = window.radioButtons.matching(NSPredicate(format: "label BEGINSWITH %@", "Rectangle"))
         XCTAssertTrue(drawing.waitForExistence(timeout: 10))
         XCTAssertTrue(window.descendants(matching: .any)["canvas-ready"].waitForExistence(timeout: 30))
         app.activate()
         let initialCorner = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1)).withOffset(CGVector(dx: -3, dy: -3))
-        initialCorner.click(forDuration: 0.1, thenDragTo: initialCorner.withOffset(CGVector(dx: 900 - window.frame.width, dy: 740 - window.frame.height)))
+        initialCorner.click(forDuration: 0.1, thenDragTo: initialCorner.withOffset(CGVector(dx: 1280 - window.frame.width, dy: 740 - window.frame.height)))
         drawing.click()
         XCTAssertTrue(rectangle.waitForExistence(timeout: 30))
+        XCTAssertGreaterThanOrEqual(rectangle.frame.width, 36)
+        XCTAssertGreaterThanOrEqual(rectangle.frame.height, 36)
 
         // Revisit the same drawing without changing its tool state between loads.
         for _ in 0..<3 {
             mindMap.click()
-            XCTAssertTrue(outline.waitForExistence(timeout: 10))
-            XCTAssertTrue(map.exists)
+            let switcher = window.buttons["document-view-switcher"]
+            XCTAssertTrue(switcher.waitForExistence(timeout: 10))
             XCTAssertFalse(rectangle.exists)
-            map.click()
-            let mapSelected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == 1"), object: map)
-            XCTAssertEqual(XCTWaiter.wait(for: [mapSelected], timeout: 10), .completed)
+            XCTAssertFalse(window.radioButtons["大纲"].exists)
+            XCTAssertFalse(window.radioButtons["思维导图"].exists)
+            if switcher.label == "切换到思维导图" { switcher.click() }
+            XCTAssertTrue(map.waitForExistence(timeout: 10))
+            XCTAssertTrue(window.toolbars.buttons["文字样式"].exists)
+            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            screenshot.name = "Mind map native title bar"; screenshot.lifetime = .keepAlways; add(screenshot)
             drawing.click()
             XCTAssertTrue(rectangle.waitForExistence(timeout: 10))
             XCTAssertFalse(outline.exists)
             XCTAssertFalse(map.exists)
-            XCTAssertEqual(webDrawingTools.count, 0, "Narrow desktop windows use only the native drawing toolbar")
+            XCTAssertEqual(webDrawingTools.count, 0, "Desktop windows use only the native drawing toolbar")
         }
         XCTAssertFalse(window.toolbars.menuButtons["More"].exists)
         for label in ["Frame", "Web embed", "Laser pointer", "Lasso selection"] {
@@ -65,6 +71,16 @@ final class ExcalidrawMacUITests: XCTestCase {
         rectangle.click()
         let toolSelected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Selected"), object: rectangle)
         XCTAssertEqual(XCTWaiter.wait(for: [toolSelected], timeout: 10), .completed)
+        let narrowCorner = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1)).withOffset(CGVector(dx: -3, dy: -3))
+        narrowCorner.click(forDuration: 0.1, thenDragTo: narrowCorner.withOffset(CGVector(dx: 900 - window.frame.width, dy: 0)))
+        let overflow = window.toolbars.popUpButtons["more toolbar items"]
+        XCTAssertTrue(overflow.waitForExistence(timeout: 5))
+        overflow.click()
+        let drawingToolsMenu = app.menuItems["Drawing tools"]
+        XCTAssertTrue(drawingToolsMenu.waitForExistence(timeout: 5))
+        drawingToolsMenu.click()
+        XCTAssertTrue(app.menuItems["Lasso selection"].waitForExistence(timeout: 5))
+        app.menuItems["Rectangle"].click()
         XCTAssertFalse(window.buttons["drawing-format-button"].exists)
         XCTAssertFalse(window.buttons["drawing-library-button"].exists)
         let web = window.webViews.firstMatch
@@ -88,7 +104,7 @@ final class ExcalidrawMacUITests: XCTestCase {
         web.buttons["Close"].firstMatch.click()
         // Verify Excalidraw's desktop format panel and Library trigger after resizing.
         let corner = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1)).withOffset(CGVector(dx: -3, dy: -3))
-        corner.click(forDuration: 0.1, thenDragTo: corner.withOffset(CGVector(dx: 220, dy: 0)))
+        corner.click(forDuration: 0.1, thenDragTo: corner.withOffset(CGVector(dx: 380, dy: 0)))
         let widerWindow = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in window.frame.width > 1000 }, object: window)
         XCTAssertEqual(XCTWaiter.wait(for: [widerWindow], timeout: 10), .completed)
         XCTAssertTrue(web.popUpButtons["Stroke"].firstMatch.waitForExistence(timeout: 5))
@@ -123,9 +139,8 @@ final class ExcalidrawMacUITests: XCTestCase {
         mindMap.click()
         XCTAssertTrue(map.waitForExistence(timeout: 10))
         XCTAssertFalse(rectangle.exists)
-        outline.click()
-        let outlineSelected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == 1"), object: outline)
-        XCTAssertEqual(XCTWaiter.wait(for: [outlineSelected], timeout: 10), .completed)
+        map.click()
+        XCTAssertTrue(outline.waitForExistence(timeout: 10))
     }
 
     func testNodeDragReparentsSubtreeAndPersists() throws {
@@ -163,7 +178,7 @@ final class ExcalidrawMacUITests: XCTestCase {
             .click(forDuration: 0.1, thenDragTo: target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).withOffset(CGVector(dx: 0, dy: 12)))
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "Desktop dragged node with descendants"; screenshot.lifetime = .keepAlways; add(screenshot)
-        window.radioButtons["大纲"].click()
+        window.buttons["切换到大纲视图"].click()
         let fold = window.buttons.matching(identifier: "折叠节点").firstMatch
         XCTAssertTrue(fold.waitForExistence(timeout: 10)); fold.click()
         XCTAssertEqual(window.buttons.matching(identifier: "选择节点").count, 1, "Folding target hides the moving subtree")
@@ -171,7 +186,7 @@ final class ExcalidrawMacUITests: XCTestCase {
         XCTAssertEqual(window.buttons.matching(identifier: "选择节点").count, 3)
         // Reopen the document to verify that the committed parent is persisted.
         window.descendants(matching: .any)["file-row-Test Canvas.excalidraw"].click()
-        let canvasShown = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: window.radioButtons["大纲"])
+        let canvasShown = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: window.buttons["document-view-switcher"])
         XCTAssertEqual(XCTWaiter.wait(for: [canvasShown], timeout: 10), .completed)
         row.click()
         XCTAssertTrue(window.buttons.matching(identifier: "折叠节点").firstMatch.waitForExistence(timeout: 10))

@@ -336,9 +336,7 @@ struct ContentView: View {
                 DocumentExportMenu(mindMap: viewModel.editorKind == "mindmap") { viewModel.requestExport(format: $0) }
                     .disabled(documentManager.currentEntry == nil || !viewModel.isCanvasReady)
             }
-            ToolbarItem(placement: .principal) {
-                DesktopEditorToolbar(viewModel: viewModel)
-            }
+            DesktopEditorToolbar(viewModel: viewModel)
             if initialEntry == nil {
                 ToolbarItem(placement: .navigation) {
                     Button {
@@ -609,6 +607,8 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
     @Published var activeDrawingTool = "selection"
     @Published var drawingToolLocked = false
     @Published var editorReadOnly = false
+    @Published var nodeActionsEnabled = false
+    @Published var nodeToolbarPanel = ""
     let webView: WKWebView
 
     func requestExport(format: String) {
@@ -622,6 +622,24 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
         if let value { payload["value"] = value }
         webView.window?.makeFirstResponder(webView)
         send(type: "desktopToolbarAction", payload: payload)
+    }
+
+    func insertMindMapImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.png, .jpeg, .gif, .webP]
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        let documentID = currentDocumentID
+        panel.begin { [weak self] result in
+            guard let self, result == .OK, self.currentDocumentID == documentID,
+                  let url = panel.url, let data = try? Data(contentsOf: url) else { return }
+            let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "image/png"
+            self.webView.window?.makeFirstResponder(self.webView)
+            self.send(type: "desktopToolbarAction", payload: [
+                "action": "nodeImage",
+                "image": ["base64": data.base64EncodedString(), "name": url.lastPathComponent, "mime": mime]
+            ])
+        }
     }
 
     private var currentDocumentID: String?
@@ -746,6 +764,11 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
             activeDrawingTool = payload["activeTool"] as? String ?? "selection"
             drawingToolLocked = payload["locked"] as? Bool ?? false
             editorReadOnly = payload["readOnly"] as? Bool ?? false
+            nodeActionsEnabled = payload["nodeActionsEnabled"] as? Bool ?? false
+            if !nodeActionsEnabled { nodeToolbarPanel = "" }
+        } else if type == "desktopNodePanelState" {
+            guard payload["docId"] as? String == currentDocumentID, editorKind == "mindmap" else { return }
+            nodeToolbarPanel = payload["panel"] as? String ?? ""
         } else if type == "saveScene" {
             handleSave(payload: payload)
         } else if type == "openLink" {
@@ -1254,6 +1277,8 @@ final class WebCanvasViewModel: NSObject, ObservableObject, WKNavigationDelegate
                 let appState = scene?["appState"] as? [String: Any]
                 let activeTool = appState?["activeTool"] as? [String: Any]
                 editorKind = docId.lowercased().hasSuffix(".mindmap") ? "mindmap" : "drawing"
+                nodeActionsEnabled = false
+                nodeToolbarPanel = ""
                 editorViewMode = views?["mode"] as? String ?? "outline"
                 activeDrawingTool = activeTool?["type"] as? String ?? "selection"
                 drawingToolLocked = activeTool?["locked"] as? Bool ?? false
@@ -1382,7 +1407,7 @@ final class SiyeApplicationDelegate: NSObject, NSApplicationDelegate {
 }
 
 
-private struct DesktopEditorToolbar: View {
+private struct DesktopEditorToolbar: ToolbarContent {
     @ObservedObject var viewModel: WebCanvasViewModel
 
     private let tools: [(type: String, symbol: String, label: String)] = [
@@ -1403,40 +1428,89 @@ private struct DesktopEditorToolbar: View {
         ("lasso", "lasso", "Lasso selection")
     ]
 
-    var body: some View {
+    var body: some ToolbarContent {
         if viewModel.editorKind == "mindmap" {
-            Picker("文档视图", selection: Binding(
-                get: { viewModel.editorViewMode },
-                set: { viewModel.performToolbarAction("view", value: $0) }
-            )) {
-                Text("大纲").tag("outline")
-                Text("思维导图").tag("map")
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 6) {
+                    toolButton("view", value: viewModel.editorViewMode == "map" ? "outline" : "map",
+                               symbol: viewModel.editorViewMode == "map" ? "list.bullet" : "point.3.connected.trianglepath.dotted",
+                               label: viewModel.editorViewMode == "map" ? "切换到大纲视图" : "切换到思维导图", selected: false)
+                        .accessibilityIdentifier("document-view-switcher")
+                    if !viewModel.editorReadOnly {
+                        Divider().frame(height: 24).padding(.horizontal, 4)
+                        nodeButton("文字样式", symbol: "textformat", panel: "style")
+                        nodeButton("表格", symbol: "tablecells", panel: "table")
+                        nodeButton("列表", symbol: "list.bullet", panel: "list")
+                        Button { viewModel.insertMindMapImage() } label: {
+                            Image(systemName: "photo").font(.system(size: 18)).frame(width: 36, height: 36)
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("插入图片")
+                        .help("插入图片")
+                        .disabled(!viewModel.nodeActionsEnabled)
+                        nodeButton("代码", symbol: "chevron.left.forwardslash.chevron.right", panel: "code")
+                        nodeButton("链接", symbol: "link", panel: "link")
+                        Divider().frame(height: 24).padding(.horizontal, 4)
+                        toolButton("node", value: "撤销", symbol: "arrow.uturn.backward", label: "撤销", selected: false)
+                        toolButton("node", value: "重做", symbol: "arrow.uturn.forward", label: "重做", selected: false)
+                        nodeButton("节点操作", symbol: "ellipsis", panel: "more")
+                    }
+                }
+                .fixedSize(horizontal: true, vertical: false)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("思维导图工具栏")
             }
-            .pickerStyle(.segmented)
-            .frame(width: 168)
-            .accessibilityIdentifier("document-view-switcher")
         } else if !viewModel.editorReadOnly {
-            HStack(spacing: 0) {
-                toolButton("lock", symbol: viewModel.drawingToolLocked ? "lock.fill" : "lock.open", label: "Keep selected tool active", selected: viewModel.drawingToolLocked)
-                Divider().frame(height: 20).padding(.horizontal, 3)
-                ForEach(tools, id: \.type) { tool in
-                    toolButton("tool", value: tool.type, symbol: tool.symbol, label: tool.label, selected: viewModel.activeDrawingTool == tool.type)
+            ToolbarItem(placement: .principal) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) {
+                        toolButton("lock", symbol: viewModel.drawingToolLocked ? "lock.fill" : "lock.open", label: "Keep selected tool active", selected: viewModel.drawingToolLocked)
+                        Divider().frame(height: 24).padding(.horizontal, 4)
+                        ForEach(tools, id: \.type) { tool in
+                            toolButton("tool", value: tool.type, symbol: tool.symbol, label: tool.label, selected: viewModel.activeDrawingTool == tool.type)
+                        }
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                    Menu {
+                        Button {
+                            viewModel.performToolbarAction("lock")
+                        } label: {
+                            Label("Keep selected tool active", systemImage: viewModel.drawingToolLocked ? "lock.fill" : "lock.open")
+                        }
+                        Divider()
+                        ForEach(tools, id: \.type) { tool in
+                            Button {
+                                viewModel.performToolbarAction("tool", value: tool.type)
+                            } label: {
+                                Label(tool.label, systemImage: tool.symbol)
+                            }
+                        }
+                    } label: {
+                        Label("Drawing tools", systemImage: "pencil.tip.crop.circle")
+                    }
+                    .labelStyle(.titleAndIcon)
+                    .accessibilityLabel("Drawing tools")
                 }
             }
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("Drawing tools")
         }
+    }
+
+    private func nodeButton(_ label: String, symbol: String, panel: String) -> some View {
+        toolButton("node", value: label, symbol: symbol, label: label, selected: viewModel.nodeToolbarPanel == panel)
+            .disabled(!viewModel.nodeActionsEnabled)
     }
 
     private func toolButton(_ action: String, value: String? = nil, symbol: String, label: String, selected: Bool) -> some View {
         Button {
             viewModel.performToolbarAction(action, value: value)
         } label: {
-            Image(systemName: symbol)
-                .font(.system(size: 14))
-                .frame(width: 24, height: 28)
+            Label(label, systemImage: symbol)
+                .labelStyle(.iconOnly)
+                .font(.system(size: 18))
+                .frame(width: 36, height: 36)
+                .contentShape(Rectangle())
                 .background(selected ? Color.accentColor.opacity(0.18) : Color.clear)
-                .cornerRadius(6)
+                .cornerRadius(8)
         }
         .buttonStyle(.borderless)
         .accessibilityLabel(label)

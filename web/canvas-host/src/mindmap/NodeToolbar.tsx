@@ -9,9 +9,10 @@ import { toggleQuote } from "./quote";
 import { schema, safeLink } from "./richText";
 import type { EditorHandle } from "./RichEditor";
 import type { StructureAction } from "./document";
+import { sendEnvelope, sendToNative } from "../bridge";
 import ToolbarIcon, { type ToolbarIconName } from "./ToolbarIcon";
 
-type Props = { getEditor: (wholeNode?: boolean) => Promise<EditorHandle | null>; active: EditorHandle | null;
+type Props = { docId: string; getEditor: (wholeNode?: boolean) => Promise<EditorHandle | null>; active: EditorHandle | null;
   action: (action: StructureAction) => void; focusNode: () => void; exitFocus?: () => void;
   image: (file: File, view: EditorView) => void; undo: () => void; redo: () => void;
   boundary: () => void; readOnly: boolean; onDismissKeyboard?: () => void;
@@ -19,6 +20,21 @@ type Props = { getEditor: (wholeNode?: boolean) => Promise<EditorHandle | null>;
 export default function NodeToolbar(props: Props) {
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const [panel, setPanel] = useState<"style" | "table" | "list" | "code" | "link" | "more" | null>(null);
+  useEffect(() => {
+    if (document.documentElement.dataset.nativeDesktop !== "true") return;
+    sendToNative(sendEnvelope("desktopNodePanelState", { docId: props.docId, panel: props.readOnly ? "" : panel ?? "" }));
+  }, [panel, props.readOnly, props.docId]);
+  useEffect(() => {
+    if (document.documentElement.dataset.nativeDesktop !== "true" || !panel) return;
+    const dismiss = (event: Event) => {
+      if (event.type === "keydown" && (event as KeyboardEvent).key !== "Escape") return;
+      if (event.type === "pointerdown" && (event.target as HTMLElement).closest(".mindmap-toolbar-panel")) return;
+      setPanel(null);
+    };
+    window.addEventListener("pointerdown", dismiss);
+    window.addEventListener("keydown", dismiss);
+    return () => { window.removeEventListener("pointerdown", dismiss); window.removeEventListener("keydown", dismiss); };
+  }, [panel]);
   const linkRange = useRef<{ from: number; to: number } | null>(null);
   const [rows, setRows] = useState(3), [columns, setColumns] = useState(3);
   const [linkText, setLinkText] = useState(""), [href, setHref] = useState(""), [error, setError] = useState("");

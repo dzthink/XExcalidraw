@@ -110,8 +110,9 @@ export type WebToNativeMessage =
   | BridgeEnvelope<{ cursor: string }>;
 
 export type DesktopToolbarActionPayload = {
-  action: "tool" | "lock" | "library" | "view";
+  action: "tool" | "lock" | "library" | "view" | "node" | "nodeImage";
   value?: string;
+  image?: { base64: string; name: string; mime: string };
 };
 
 export type DesktopToolbarStatePayload = {
@@ -121,4 +122,5 @@ export type DesktopToolbarStatePayload = {
   activeTool?: string;
   locked?: boolean;
   viewMode?: "outline" | "map";
+  nodeActionsEnabled?: boolean;
 };

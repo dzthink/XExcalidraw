@@ -1,0 +1,125 @@
+Window: "", App: Siye.
+0 standard window Secondary Actions: Raise, ID: SwiftUI.PresentedWindowContent<XExcalidrawMac.DocumentWindowRequest, SwiftUI.ModifiedContent<XExcalidrawMac.ContentView, SwiftUI._PreferenceWritingModifier<SwiftUI.PreferredColorSchemeKey>>>-1-AppWindow-1
+	1 split group SwiftUI.PresentedWindowContent<XExcalidrawMac.DocumentWindowRequest, SwiftUI.ModifiedContent<XExcalidrawMac.ContentView, SwiftUI._PreferenceWritingModifier<SwiftUI.PreferredColorSchemeKey>>>-1-AppWindow-1, SidebarNavigationSplitView
+		2 scroll area documents-sidebar
+			3 button Description: Test Documents, Value: Expanded, ID: folder-row-Test Documents
+			4 button Description: Test Canvas, Value: Selected, ID: file-row-Test Canvas.excalidraw
+			5 button Description: Test Mind Map, ID: file-row-Test Mind Map.mindmap
+		6 splitter (disabled, settable, float) 248
+		7 scroll area
+			8 HTML content Description: Siye, URL: app:///index.html
+				9 container
+					10 container
+						11 container Selected shape actions
+							12 heading Selected shape actions, Value: 2
+								13 text Selected shape actions
+							14 container
+								15 button #1e1e1e
+								16 button #e03131
+								17 button #2f9e44
+								18 button #1971c2
+								19 button #f08c00
+								20 pop up button Stroke, Help: Show stroke color picker
+							21 container
+								22 button transparent
+								23 button #ffc9c9
+								24 button #b2f2bb
+								25 button #a5d8ff
+								26 button #ffec99
+								27 pop up button Background, Help: Show background color picker
+							28 container Stroke width
+								29 text Stroke width
+								30 container Thin
+									31 radio button Thin, Value: 0
+								32 container Bold
+									33 radio button Bold, Value: 1
+								34 container Extra bold
+									35 radio button Extra bold, Value: 0
+							36 container Stroke style
+								37 text Stroke style
+								38 container Solid
+									39 radio button Solid, Value: 1
+								40 container Dashed
+									41 radio button Dashed, Value: 0
+								42 container Dotted
+									43 radio button Dotted, Value: 0
+							44 container Sloppiness
+								45 text Sloppiness
+								46 container Architect
+									47 radio button Architect, Value: 0
+								48 container Artist
+									49 radio button Artist, Value: 1
+								50 container Cartoonist
+									51 radio button Cartoonist, Value: 0
+							52 container Edges
+								53 text Edges
+								54 container Sharp
+									55 radio button Sharp, Value: 0
+								56 container Round
+									57 radio button Round, Value: 1
+							58 container
+								59 text Opacity
+								60 slider (settable, float) Opacity 100 0, Value: 100
+									61 value indicator 100
+								62 text 100 0
+							63 container Layers
+								64 text Layers
+								65 button Send to back — Cmd+Option+[
+								66 button Send backward — Cmd+[
+								67 button Bring forward — Cmd+]
+								68 button Bring to front — Cmd+Option+]
+						69 container Library
+							70 checkbox Library, Value: 0
+							71 text Library
+						72 container Canvas actions
+							73 heading Canvas actions, Value: 2
+								74 text Canvas actions
+							75 button Zoom out, Help: Zoom out — Cmd+-
+							76 button Reset zoom
+							77 button Zoom in, Help: Zoom in — Cmd++
+							78 button (disabled) Undo
+							79 button (disabled) Redo
+					80 text Drawing canvas
+	81 toolbar
+		82 button Description: externaldrive.badge.plus, Secondary Actions: Increment, Decrement, Delete, Cancel, Move next, Remove from toolbar
+		83 pop up button more toolbar items
+			84 menu Secondary Actions: Cancel
+				85 (selected)
+				86 Drawing tools, ID: ID(id: 153102)
+					87 menu Secondary Actions: Cancel
+						88 Keep selected tool active, ID: menuAction:
+						89 Hand, ID: menuAction:
+						90 Selection, ID: menuAction:
+						91 Rectangle, ID: menuAction:
+						92 Diamond, ID: menuAction:
+						93 Ellipse, ID: menuAction:
+						94 Arrow, ID: menuAction:
+						95 Line, ID: menuAction:
+						96 Draw, ID: menuAction:
+						97 Text, ID: menuAction:
+						98 Insert image, ID: menuAction:
+						99 Eraser, ID: menuAction:
+						100 Frame, ID: menuAction:
+						101 Web embed, ID: menuAction:
+						102 Laser pointer, ID: menuAction:
+						103 Lasso selection, ID: menuAction:
+				104 导入
+				105 导出, ID: ID(id: 132527)
+					106 menu Secondary Actions: Cancel
+						107 导出为 HTML, ID: menuAction:
+						108 导出为 PNG, ID: menuAction:
+						109 导出为 SVG, ID: menuAction:
+						110 导出为 JSON, ID: menuAction:
+	111 close button
+	112 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	113 minimize button
+	114 text
+115 menu bar
+	116 Siye
+	117 File
+	118 Edit
+	119 View
+	120 Window
+	121 Help
+
+The focused UI element is 9 container

@@ -70,6 +70,7 @@ The web editor reports the current document and toolbar selection. The native ho
   activeTool?: string;
   locked?: boolean;
   viewMode?: "outline" | "map";
+  nodeActionsEnabled?: boolean;
 }
 ```
 
@@ -81,12 +82,19 @@ The web host pins the upstream `0.18.0-864353b` prerelease to provide native las
 
 ```ts
 {
-  action: "tool" | "lock" | "library" | "view";
+  action: "tool" | "lock" | "library" | "view" | "node" | "nodeImage";
   value?: string;
+  image?: { base64: string; name: string; mime: string };
 }
 ```
 
 `tool` selects a supported Excalidraw tool; `lock` toggles tool locking; `library` toggles the default sidebar's library tab. `view` accepts `outline` or `map` and flushes pending mind-map edits before switching. Drawing mutations are ignored in read-only documents. Drawing commands return keyboard focus to the canvas so existing shortcuts remain usable.
+
+Mind-map title-bar controls start with one icon button toggling `view`, followed by text style, table, list, image, code, link, undo, redo, and node actions. `node` forwards the operation label to the React toolbar handlers (undo/redo use document history directly). `nodeImage` inserts a native file picker result into the selected node. Node-specific controls are disabled without a selection; read-only documents show only the view toggle. The web toolbar hides its primary row on macOS and opens secondary panels downward at the top of the editor. Clicking outside or pressing Escape dismisses a panel.
+
+### desktopNodePanelState (Web → Native, macOS)
+
+`{ docId: string, panel: string }` reports the expanded node panel (`style`, `table`, `list`, `code`, `link`, `more`, or an empty string), allowing the native title-bar button to show its selected state. Reports for other documents are ignored.
 
 ### didChange
 ```json

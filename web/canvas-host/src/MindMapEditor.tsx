@@ -36,6 +36,7 @@ export default function MindMapEditor(props: Props) {
   const [active, setActive] = useState<EditorHandle | null>(null), [error, setError] = useState(""), [saving, setSaving] = useState(false);
   const suppressTap = useRef(false);
   const [touchUI, setTouchUI] = useState(() => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || navigator.maxTouchPoints > 0 && window.matchMedia("(pointer: coarse)").matches);
+  const nativeDesktop = document.documentElement.dataset.nativeDesktop === "true";
   const [draggingNode, setDraggingNode] = useState(false);
   const editorHost = useRef<HTMLDivElement>(null);
   const host = useRef<HTMLDivElement>(null), mind = useRef<MindElixir | null>(null), activeRef = useRef<EditorHandle | null>(null);
@@ -458,15 +459,25 @@ export default function MindMapEditor(props: Props) {
   switchViewRef.current = switchView;
   useEffect(() => {
     if (document.documentElement.dataset.nativeDesktop !== "true") return;
-    const payload: DesktopToolbarStatePayload = { docId: props.docId, kind: "mindmap", viewMode: mode, readOnly: props.readOnly };
+    const payload: DesktopToolbarStatePayload = { docId: props.docId, kind: "mindmap", viewMode: mode, readOnly: props.readOnly, nodeActionsEnabled: !draggingNode && !!(selected.length || active || doc?.views.focusId) };
     sendToNative(sendEnvelope("desktopToolbarState", payload));
-  }, [props.docId, props.readOnly, mode]);
+  }, [props.docId, props.readOnly, mode, draggingNode, selected.length, active, doc?.views.focusId]);
+  const undoRef = useRef(undo);
+  undoRef.current = undo;
   useEffect(() => {
     const removeListener = addBridgeListener(message => {
       if (message.type !== "desktopToolbarAction") return;
       const payload = message.payload as DesktopToolbarActionPayload;
       if (payload.action === "view" && (payload.value === "outline" || payload.value === "map")) {
         void switchViewRef.current(payload.value);
+      } else if (payload.action === "node" && payload.value) {
+        if (payload.value === "撤销" || payload.value === "重做") {
+          void undoRef.current(payload.value === "重做");
+        } else {
+          window.dispatchEvent(new CustomEvent("siye-node-toolbar-action", { detail: payload.value }));
+        }
+      } else if (payload.action === "nodeImage" && payload.image) {
+        window.dispatchEvent(new CustomEvent("siye-node-toolbar-image", { detail: payload.image }));
       }
     });
     return () => { removeListener(); };
@@ -531,7 +542,7 @@ export default function MindMapEditor(props: Props) {
       edit={() => edit(selectedId)} action={action} focusNode={() => focus(selectedId)}
       exitFocus={doc.views.focusId ? () => focus(null) : undefined}
       dismiss={() => { mind.current?.clearSelection(); updateView(document => { document.views.selectedIds = []; }); }} />
-      : !draggingNode && (selected.length > 0 || active || doc.views.focusId) && <NodeToolbar getEditor={ensureEditor} active={active} action={action} focusNode={() => focus(selectedId)} exitFocus={doc.views.focusId ? () => focus(null) : undefined} image={upload} undo={() => undo()} redo={() => undo(true)} boundary={() => store.boundary()} readOnly={props.readOnly || !selected.length && !active} onDismissKeyboard={touchUI && mode === "map" ? () => { setEditing(null); activeRef.current = null; setActive(null); } : undefined} />}
+      : !draggingNode && (nativeDesktop || selected.length > 0 || active || doc.views.focusId) && <NodeToolbar key={nativeDesktop ? mode : undefined} docId={props.docId} getEditor={ensureEditor} active={active} action={action} focusNode={() => focus(selectedId)} exitFocus={doc.views.focusId ? () => focus(null) : undefined} image={upload} undo={() => undo()} redo={() => undo(true)} boundary={() => store.boundary()} readOnly={props.readOnly || !selected.length && !active} onDismissKeyboard={touchUI && mode === "map" ? () => { setEditing(null); activeRef.current = null; setActive(null); } : undefined} />}
     {error && <div className="mindmap-save-error" role="alert">{error}<button onClick={() => { void flush(); }}>重试保存</button><button aria-label="关闭提示" onClick={() => setError("")}>×</button></div>}
   </div>;
 }

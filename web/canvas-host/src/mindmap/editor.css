@@ -267,3 +267,16 @@ html[data-native-desktop="true"] .siye-editor .mind-elixir-toolbar.lt{top:16px}
 .siye-editor .mindmap-mobile-node-toolbar.has-open-menu{z-index:31}
 
 .siye-editor .siye-node-drag-line .siye-node-drag-slot{stroke-width:3;stroke-dasharray:none}
+
+/* macOS primary tools live in the title bar; their panels open below it. */
+html[data-native-desktop="true"] .siye-editor .mindmap-node-toolbar{
+  top:0;bottom:auto;left:0;right:0;transform:none;height:0;max-width:none;
+  padding:0;border:0;border-radius:0;background:none;box-shadow:none;
+}
+html[data-native-desktop="true"] .siye-editor .mindmap-toolbar-actions,
+html[data-native-desktop="true"] .siye-editor .mindmap-keyboard-dismiss{display:none}
+html[data-native-desktop="true"] .siye-editor .mindmap-toolbar-panel{
+  top:10px;bottom:auto;max-width:calc(100% - 24px);max-height:calc(100dvh - 24px);
+  overflow:auto;
+}
+html[data-native-desktop="true"] .siye-editor .mindmap-toolbar-panel [role=alert]{top:calc(100% + 6px);bottom:auto}
